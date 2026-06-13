@@ -17,6 +17,7 @@ os.environ.setdefault("XAUTHORITY", "/home/pivic/.Xauthority")
 from state import StateBus
 from state_machine import StateMachine
 from audio_thread import AudioThread
+from vision_thread import VisionThread
 from renderer import Renderer
 
 
@@ -42,6 +43,10 @@ def main():
     audio.start()
     print("[oto] audio thread started")
 
+    vision = VisionThread(bus, cfg)
+    vision.start()
+    print("[oto] vision thread started")
+
     sm_thread = threading.Thread(target=state_machine_loop, args=(sm, stop), daemon=True, name="state")
     sm_thread.start()
     print("[oto] state machine started")
@@ -53,6 +58,7 @@ def main():
     finally:
         stop.set()
         audio.stop()
+        vision.stop()
         print("[oto] shutdown complete")
 
 

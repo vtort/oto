@@ -28,6 +28,14 @@
     "color_touch":   "#fb923c",
     "color_excited": "#f43f5e"
   },
+  "vision": {
+    "device_index": 0,
+    "capture_width": 320,
+    "capture_height": 240,
+    "fps": 10,
+    "detect_scale": 1.2,
+    "detect_neighbors": 4
+  },
   "states": {
     "idle_timeout_s": 10,
     "excited_cooldown_s": 3
