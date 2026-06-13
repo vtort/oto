@@ -130,7 +130,6 @@ _S = {
     MascotState.TOUCH:   _state(0.008,    _R+.02),
     MascotState.EXCITED: _state(_O*1.3,   _R+.04),
 }
-}
 
 def _lerp(a, b, t):
     return a + (b - a) * t
