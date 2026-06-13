@@ -1,274 +1,369 @@
 import math
-import random
-import pygame
-import cv2
 import numpy as np
+import pygame
+import moderngl
+import cv2
 from state import MascotState, StateBus
 
 
-def hex_to_rgb(h):
-    h = h.lstrip("#")
-    return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+# ── Shaders ───────────────────────────────────────────────────────────────────
+
+VERT = """
+#version 310 es
+in vec2 in_vert;
+out vec2 v_uv;
+void main() {
+    v_uv = in_vert * 0.5 + 0.5;
+    gl_Position = vec4(in_vert, 0.0, 1.0);
+}
+"""
+
+FRAG = """
+#version 310 es
+precision highp float;
+in  vec2  v_uv;
+out vec4  fragColor;
+
+uniform vec2  u_res;
+uniform float u_time;
+uniform float u_bass;
+uniform float u_mid;
+uniform float u_high;
+uniform float u_vol;
+uniform float u_fft[16];
+
+uniform vec4  u_ep[6];   // cx, cy, rx, ry  (aspect-corrected space)
+uniform float u_ea[6];   // rotation angle per ellipse
+uniform vec3  u_ec[6];   // rgb per ellipse
+
+uniform vec4  u_blob;    // cx, cy, rx, ry
+uniform float u_bn;      // superellipse power
+
+float sdEllipse(vec2 p, vec2 cen, vec2 r, float ang) {
+    vec2 d = p - cen;
+    float c = cos(ang), s = sin(ang);
+    vec2 q = vec2(c*d.x + s*d.y, -s*d.x + c*d.y);
+    return length(q / r) - 1.0;
+}
+
+float superEllipse(vec2 p, vec2 cen, vec2 r, float n) {
+    vec2 q = (p - cen) / r;
+    return pow(abs(q.x), n) + pow(abs(q.y), n) - 1.0;
+}
+
+void main() {
+    float asp = u_res.x / u_res.y;
+    vec2 p = (v_uv * 2.0 - 1.0) * vec2(asp, 1.0);
+
+    // Background
+    vec3 col = vec3(0.04, 0.04, 0.07);
+
+    // Screen-blend 6 ellipses
+    vec3 scr = vec3(0.0);
+    for (int i = 0; i < 6; i++) {
+        float d = sdEllipse(p, u_ep[i].xy, u_ep[i].zw, u_ea[i]);
+        float m = 1.0 - smoothstep(-0.025, 0.025, d);
+        scr = 1.0 - (1.0 - scr) * (1.0 - u_ec[i] * m);
+    }
+    float presence = (scr.r + scr.g + scr.b) * 0.333;
+    col = mix(col, scr, clamp(presence * 3.0, 0.0, 1.0));
+
+    // White central blob (superellipse morphs by state)
+    float bf = superEllipse(p, u_blob.xy, u_blob.zw, u_bn);
+    float bm = 1.0 - smoothstep(-0.04, 0.04, bf);
+    col = mix(col, vec3(1.0), bm);
+
+    // Vignette
+    vec2 vd = v_uv - 0.5;
+    col *= 1.0 - dot(vd, vd) * 1.4;
+
+    fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+}
+"""
+
+# Overlay quad for HUD texture
+HUD_VERT = """
+#version 310 es
+in vec2 in_vert;
+in vec2 in_uv;
+out vec2 v_uv;
+void main() {
+    v_uv = in_uv;
+    gl_Position = vec4(in_vert, 0.0, 1.0);
+}
+"""
+
+HUD_FRAG = """
+#version 310 es
+precision mediump float;
+in  vec2      v_uv;
+out vec4      fragColor;
+uniform sampler2D u_tex;
+void main() {
+    fragColor = texture(u_tex, v_uv);
+}
+"""
 
 
-def lerp(a, b, t):
+# ── State configurations ───────────────────────────────────────────────────────
+
+# Colors: blue, red, green, orange, cyan, pink — matching the Figma palette
+ELLIPSE_COLORS = np.array([
+    [0.00, 0.47, 1.00],
+    [1.00, 0.15, 0.12],
+    [0.10, 0.82, 0.30],
+    [1.00, 0.55, 0.00],
+    [0.20, 0.85, 0.95],
+    [1.00, 0.10, 0.55],
+], dtype=np.float32)
+
+# Per state: 6 × (cx, cy, rx, ry, angle_base)
+# cx/cy in aspect-corrected space (aspect ≈ 1.667 for 800×480)
+_S = {
+    MascotState.IDLE: np.array([
+        [ 0.00,  0.08, 0.40, 0.30,  0.00],
+        [-0.18, -0.06, 0.38, 0.26,  1.20],
+        [ 0.15,  0.06, 0.34, 0.32,  2.50],
+        [-0.10,  0.14, 0.32, 0.24,  3.80],
+        [ 0.12, -0.10, 0.30, 0.28,  5.10],
+        [-0.05,  0.00, 0.28, 0.22,  0.60],
+    ], dtype=np.float32),
+
+    MascotState.AWARE: np.array([
+        [ 0.00,  0.04, 0.50, 0.36,  0.00],
+        [-0.25, -0.04, 0.46, 0.30,  1.00],
+        [ 0.22,  0.08, 0.42, 0.38,  2.20],
+        [-0.12,  0.18, 0.38, 0.26,  3.50],
+        [ 0.16, -0.14, 0.36, 0.32,  4.80],
+        [-0.06,  0.00, 0.32, 0.24,  0.30],
+    ], dtype=np.float32),
+
+    MascotState.LISTEN: np.array([
+        [ 0.00,  0.00, 0.60, 0.22,  0.00],
+        [-0.30,  0.00, 0.55, 0.20,  0.80],
+        [ 0.26,  0.02, 0.52, 0.24,  2.00],
+        [-0.12,  0.04, 0.48, 0.18,  3.30],
+        [ 0.18, -0.04, 0.42, 0.22,  4.60],
+        [-0.06,  0.00, 0.36, 0.16,  0.20],
+    ], dtype=np.float32),
+
+    MascotState.TOUCH: np.array([
+        [ 0.05,  0.10, 0.44, 0.38,  0.50],
+        [-0.35,  0.12, 0.20, 0.42,  1.80],
+        [ 0.32,  0.06, 0.20, 0.40,  3.00],
+        [-0.10,  0.20, 0.40, 0.24,  4.20],
+        [ 0.14, -0.18, 0.32, 0.30,  5.50],
+        [-0.04,  0.02, 0.26, 0.34,  0.80],
+    ], dtype=np.float32),
+
+    MascotState.EXCITED: np.array([
+        [ 0.00,  0.00, 0.55, 0.42,  0.00],
+        [-0.35, -0.12, 0.50, 0.36,  1.50],
+        [ 0.32,  0.14, 0.46, 0.38,  2.80],
+        [-0.14,  0.22, 0.44, 0.30,  4.00],
+        [ 0.20, -0.20, 0.40, 0.34,  5.20],
+        [-0.08,  0.05, 0.36, 0.28,  0.60],
+    ], dtype=np.float32),
+}
+
+# (cx, cy, rx, ry, superellipse_n)
+_BLOB = {
+    MascotState.IDLE:    (0.0, 0.0, 0.22, 0.22, 2.5),
+    MascotState.AWARE:   (0.0, 0.0, 0.26, 0.26, 3.0),
+    MascotState.LISTEN:  (0.0, 0.0, 0.34, 0.17, 2.0),
+    MascotState.TOUCH:   (0.0, 0.0, 0.24, 0.30, 3.5),
+    MascotState.EXCITED: (0.0, 0.0, 0.30, 0.30, 2.0),
+}
+
+
+def _lerp(a, b, t):
     return a + (b - a) * t
-
-
-def lerp_color(c1, c2, t):
-    return tuple(int(lerp(a, b, t)) for a, b in zip(c1, c2))
-
-
-def hsv_to_rgb(h, s, v):
-    h = h % 360
-    c = v * s
-    x = c * (1 - abs((h / 60) % 2 - 1))
-    m = v - c
-    if   h < 60:  r,g,b = c,x,0
-    elif h < 120: r,g,b = x,c,0
-    elif h < 180: r,g,b = 0,c,x
-    elif h < 240: r,g,b = 0,x,c
-    elif h < 300: r,g,b = x,0,c
-    else:          r,g,b = c,0,x
-    return (int((r+m)*255), int((g+m)*255), int((b+m)*255))
-
-
-class Particle:
-    def __init__(self, x, y, vx, vy, color, life):
-        self.x, self.y   = x, y
-        self.vx, self.vy = vx, vy
-        self.color        = color
-        self.life         = life
-        self.max_life     = life
-
-    def update(self):
-        self.x  += self.vx
-        self.y  += self.vy
-        self.vx *= 0.96
-        self.vy *= 0.96
-        self.life -= 1
-
-    @property
-    def alpha(self):
-        return self.life / self.max_life
-
-    @property
-    def alive(self):
-        return self.life > 0
 
 
 class Renderer:
     def __init__(self, bus: StateBus, cfg: dict):
-        self.bus  = bus
-        self.cfg  = cfg
-        self.W    = cfg["display"]["width"]
-        self.H    = cfg["display"]["height"]
-        self.fps  = cfg["display"]["fps"]
+        self.bus = bus
+        self.W   = cfg["display"]["width"]
+        self.H   = cfg["display"]["height"]
+        self.fps = cfg["display"]["fps"]
 
+        # ── pygame + OpenGL window ─────────────────────────────────────
         pygame.init()
-        flags = pygame.FULLSCREEN if cfg["display"]["fullscreen"] else 0
-        self.screen = pygame.display.set_mode((self.W, self.H), flags)
+        flags = pygame.OPENGL | pygame.DOUBLEBUF
+        if cfg["display"]["fullscreen"]:
+            flags |= pygame.FULLSCREEN
+        pygame.display.set_mode((self.W, self.H), flags)
         pygame.display.set_caption("OTO")
         pygame.mouse.set_visible(False)
-        self.clock  = pygame.time.Clock()
+        self.clock = pygame.time.Clock()
 
-        # Blob shape
-        self.N      = 128          # puntos del blob
-        self.radii  = [0.0] * self.N   # radio actual suavizado por punto
+        # ── ModernGL context ──────────────────────────────────────────
+        self.ctx = moderngl.create_context(require=310)
+        self.ctx.enable(moderngl.BLEND)
+        self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
 
-        # Color
-        self._hue    = 260.0      # arranca en violeta
-        self._sat    = 0.8
-        self._val    = 0.85
+        # ── Main scene program ────────────────────────────────────────
+        self.prog = self.ctx.program(vertex_shader=VERT, fragment_shader=FRAG)
+        quad = np.array([-1,-1, 1,-1, -1,1, 1,1], dtype=np.float32)
+        self.vbo  = self.ctx.buffer(quad)
+        self.vao  = self.ctx.simple_vertex_array(self.prog, self.vbo, 'in_vert')
 
-        # Partículas
-        self.particles = []
+        # ── HUD overlay program ───────────────────────────────────────
+        self.hud_prog = self.ctx.program(vertex_shader=HUD_VERT, fragment_shader=HUD_FRAG)
+        hud_verts = np.array([
+            -1,-1, 0,1,
+             1,-1, 1,1,
+            -1, 1, 0,0,
+             1, 1, 1,0,
+        ], dtype=np.float32)
+        self.hud_vbo = self.ctx.buffer(hud_verts)
+        self.hud_vao = self.ctx.simple_vertex_array(
+            self.hud_prog, self.hud_vbo, 'in_vert', 'in_uv')
+        self.hud_tex = self.ctx.texture((self.W, self.H), 4)
+        self.hud_tex.filter = moderngl.LINEAR, moderngl.LINEAR
+        self.hud_surf = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
+        self.hud_font = pygame.font.SysFont(None, 22)
 
-        # Tiempo
-        self._t = 0.0
+        # Static uniform
+        self.prog['u_res'].value = (float(self.W), float(self.H))
 
-        # Smooth bars
-        self._bars    = [0.0] * 16
-        self._volume  = 0.0
-        self._bass    = 0.0
-        self._mid     = 0.0
-        self._high    = 0.0
+        # ── Smooth state ──────────────────────────────────────────────
+        self._t        = 0.0
+        self._ep       = _S[MascotState.IDLE].copy()   # current ellipse params
+        self._blob     = list(_BLOB[MascotState.IDLE])
+        self._vol      = 0.0
+        self._bass     = 0.0
+        self._mid      = 0.0
+        self._high     = 0.0
+        self._bars     = [0.0] * 16
+        self._rot_offs = np.zeros(6, dtype=np.float32)  # individual rotation drift
 
-        # Surface para alpha blending
-        self.glow_surf = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
+    def _update_hud(self, state, face, volume, debug_frame):
+        self.hud_surf.fill((0, 0, 0, 0))
 
-    def _blob_points(self, cx, cy, t, bars, bass, mid, high, volume):
-        pts = []
-        base_r = min(self.W, self.H) * 0.22
+        state_col = {
+            MascotState.IDLE:    (100, 100, 180),
+            MascotState.AWARE:   (80,  180, 240),
+            MascotState.LISTEN:  (80,  220, 140),
+            MascotState.TOUCH:   (240, 160, 60),
+            MascotState.EXCITED: (240, 80,  80),
+        }.get(state, (140, 140, 140))
 
-        for i in range(self.N):
-            angle = (i / self.N) * math.pi * 2
-            bar_i = bars[int(i / self.N * len(bars))]
-
-            # Capas de deformación: cada banda afecta a una frecuencia espacial distinta
-            d  = 0.0
-            d += bass  * 55  * math.sin(angle * 2  + t * 0.9)
-            d += bass  * 30  * math.sin(angle * 3  - t * 0.7 + 0.5)
-            d += mid   * 28  * math.sin(angle * 5  + t * 1.4)
-            d += mid   * 18  * math.sin(angle * 7  - t * 1.8 + 1.0)
-            d += high  * 14  * math.sin(angle * 11 + t * 2.8)
-            d += high  * 8   * math.sin(angle * 17 - t * 3.5)
-            d += bar_i * 22  * math.sin(angle * 4  + t * 1.1 + i * 0.1)
-            d += volume * 10 * math.sin(angle * 9  + t * 2.0)
-
-            # Radio target
-            target_r = base_r + d
-
-            # Smooth por punto
-            self.radii[i] = lerp(self.radii[i], target_r, 0.12)
-            r = max(10, self.radii[i])
-
-            pts.append((cx + math.cos(angle) * r,
-                        cy + math.sin(angle) * r))
-        return pts
-
-    def _emit_particles(self, pts, color, density=0.15):
-        for pt in pts:
-            if random.random() < density:
-                speed = random.uniform(0.3, 2.5)
-                angle = random.uniform(0, math.pi * 2)
-                self.particles.append(Particle(
-                    pt[0], pt[1],
-                    math.cos(angle) * speed,
-                    math.sin(angle) * speed,
-                    color,
-                    random.randint(20, 50)
-                ))
-
-    def draw_frame(self, snap):
-        t       = self._t
-        state   = snap["state"]
-        bars    = snap["fft_bars"]
-        volume  = snap["volume"]
-        bass    = snap["bass"]
-        mid     = snap["mid"]
-        high    = snap["high"]
-        face    = snap.get("face_detected", False)
-
-        # Smooth audio
-        sp = 0.15
-        self._bars   = [lerp(self._bars[i],   bars[i], sp) for i in range(16)]
-        self._volume = lerp(self._volume, volume, sp)
-        self._bass   = lerp(self._bass,   bass,   sp)
-        self._mid    = lerp(self._mid,    mid,    sp)
-        self._high   = lerp(self._high,   high,   sp)
-
-        # ── Color según estado y audio ─────────────────────────────────
-        target_hue = {
-            MascotState.IDLE:    260,   # violeta
-            MascotState.AWARE:   200,   # cian
-            MascotState.LISTEN:  160,   # verde-cian
-            MascotState.TOUCH:   30,    # naranja
-            MascotState.EXCITED: 0,     # rojo/rosa
-        }.get(state, 260)
-
-        # Audio empuja el hue: bass → rojo, high → azul
-        target_hue += self._bass * 40 - self._high * 30
-        self._hue    = lerp(self._hue, target_hue, 0.03)
-        self._sat    = lerp(self._sat,  0.6 + self._volume * 0.4, 0.05)
-        self._val    = lerp(self._val,  0.7 + self._volume * 0.3, 0.05)
-
-        col_main  = hsv_to_rgb(self._hue,        self._sat, self._val)
-        col_inner = hsv_to_rgb(self._hue + 30,   self._sat * 0.6, self._val * 0.5)
-        col_outer = hsv_to_rgb(self._hue - 20,   self._sat * 0.4, self._val * 0.3)
-
-        # ── Fondo: trail oscuro con persistencia ──────────────────────
-        bg_surf = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
-        bg_surf.fill((6, 6, 8, 180))   # alpha trail — cuanto más bajo más trail
-        self.screen.blit(bg_surf, (0, 0))
-
-        cx = self.W // 2
-        cy = self.H // 2 + 10
-
-        # ── Blob principal ────────────────────────────────────────────
-        pts = self._blob_points(cx, cy, t, self._bars,
-                                self._bass, self._mid, self._high, self._volume)
-
-        # Glow exterior (3 capas)
-        self.glow_surf.fill((0, 0, 0, 0))
-        for layer in range(3, 0, -1):
-            alpha = int(18 + self._volume * 30) * layer // 3
-            offset = layer * 12
-            off_pts = []
-            for i, (px, py) in enumerate(pts):
-                angle = (i / self.N) * math.pi * 2
-                off_pts.append((px + math.cos(angle) * offset,
-                                py + math.sin(angle) * offset))
-            if len(off_pts) > 2:
-                pygame.draw.polygon(self.glow_surf,
-                    (*col_outer, alpha), off_pts)
-        self.screen.blit(self.glow_surf, (0, 0))
-
-        # Blob relleno
-        if len(pts) > 2:
-            pygame.draw.polygon(self.screen, col_inner, pts)
-
-        # Contorno brillante
-        pygame.draw.polygon(self.screen, col_main, pts, 2)
-
-        # ── Partículas ────────────────────────────────────────────────
-        if state == MascotState.EXCITED or self._bass > 0.5:
-            self._emit_particles(pts[::8], col_main, density=0.3)
-        elif self._volume > 0.1:
-            self._emit_particles(pts[::16], col_main, density=0.05)
-
-        self.particles = [p for p in self.particles if p.alive]
-        for p in self.particles:
-            p.update()
-            alpha = int(p.alpha * 180)
-            r     = max(1, int(p.alpha * 3))
-            s = pygame.Surface((r*2, r*2), pygame.SRCALPHA)
-            pygame.draw.circle(s, (*p.color, alpha), (r, r), r)
-            self.screen.blit(s, (int(p.x)-r, int(p.y)-r))
-
-        # ── Ondas interiores (alta frecuencia) ────────────────────────
-        if self._high > 0.15:
-            inner_r = min(self.W, self.H) * 0.08
-            for ring in range(3):
-                rr  = inner_r * (ring + 1) * (1 + self._high * 0.3)
-                pts_r = []
-                for i in range(48):
-                    a   = (i / 48) * math.pi * 2
-                    dr  = self._high * 8 * math.sin(a * 6 + t * 4 + ring)
-                    pts_r.append((cx + math.cos(a) * (rr + dr),
-                                  cy + math.sin(a) * (rr + dr)))
-                alpha_r = int(self._high * 80)
-                s = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
-                pygame.draw.polygon(s, (*col_main, alpha_r), pts_r, 1)
-                self.screen.blit(s, (0, 0))
-
-        # ── HUD minimal ───────────────────────────────────────────────
-        font = pygame.font.SysFont(None, 22)
-        hud = [
-            (f"{state.name}", col_main),
-            (f"FACE: {'YES' if face else 'NO'}", (80,80,80) if not face else (100,200,100)),
-            (f"VOL {int(self._volume*100):3d}%", (60,60,60)),
+        lines = [
+            (state.name,                             state_col),
+            (f"FACE: {'YES' if face else 'NO'}",     (80,200,80) if face else (60,60,60)),
+            (f"VOL  {int(volume*100):3d}%",          (60,60,60)),
         ]
-        for i, (txt, c) in enumerate(hud):
-            self.screen.blit(font.render(txt, True, c), (10, 10 + i*20))
+        for i, (txt, col) in enumerate(lines):
+            surf = self.hud_font.render(txt, True, col)
+            self.hud_surf.blit(surf, (10, 10 + i * 20))
 
-        # ── Camera preview ────────────────────────────────────────────
-        debug_frame = snap.get("debug_frame")
         if debug_frame is not None:
             try:
-                h, w  = debug_frame.shape[:2]
+                h, w   = debug_frame.shape[:2]
                 dw, dh = 140, int(h * 140 / w)
-                small = cv2.resize(debug_frame, (dw, dh))
-                small_rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
-                surf = pygame.surfarray.make_surface(
-                    np.transpose(small_rgb, (1, 0, 2)))
-                dx = self.W - dw - 6
-                dy = self.H - dh - 6
-                pygame.draw.rect(self.screen, (25,25,25),
-                    (dx-2, dy-2, dw+4, dh+4))
-                self.screen.blit(surf, (dx, dy))
+                small  = cv2.resize(debug_frame, (dw, dh))
+                rgb    = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+                cam_s  = pygame.surfarray.make_surface(np.transpose(rgb, (1,0,2)))
+                pygame.draw.rect(self.hud_surf, (20,20,20,200),
+                    (self.W-dw-8, self.H-dh-8, dw+4, dh+4))
+                self.hud_surf.blit(cam_s, (self.W-dw-6, self.H-dh-6))
             except Exception:
                 pass
+
+        data = pygame.image.tostring(self.hud_surf, 'RGBA', True)
+        self.hud_tex.write(data)
+
+    def draw_frame(self, snap):
+        t      = self._t
+        state  = snap["state"]
+        bars   = snap["fft_bars"]
+        vol    = snap["volume"]
+        bass   = snap["bass"]
+        mid    = snap["mid"]
+        high   = snap["high"]
+        face   = snap.get("face_detected", False)
+        dframe = snap.get("debug_frame")
+
+        # Smooth audio
+        sp = 0.12
+        self._vol  = _lerp(self._vol,  vol,  sp)
+        self._bass = _lerp(self._bass, bass, sp)
+        self._mid  = _lerp(self._mid,  mid,  sp)
+        self._high = _lerp(self._high, high, sp)
+        self._bars = [_lerp(self._bars[i], bars[i], sp) for i in range(16)]
+
+        # Target ellipse config
+        target_ep   = _S[state].copy()
+        target_blob = list(_BLOB[state])
+
+        # Audio deformation: bass scales ellipses, high adds jitter
+        scale = 1.0 + self._bass * 0.25 + self._vol * 0.10
+        for i in range(6):
+            target_ep[i, 2] *= scale
+            target_ep[i, 3] *= scale
+            # High frequencies add asymmetric wobble
+            target_ep[i, 2] += self._high * 0.04 * math.sin(t * 3.0 + i * 1.1)
+            target_ep[i, 3] += self._high * 0.04 * math.cos(t * 2.7 + i * 0.9)
+
+        # Blob reacts to bass
+        blob_scale = 1.0 + self._bass * 0.15
+        target_blob[2] *= blob_scale
+        target_blob[3] *= blob_scale
+
+        # Lerp current → target
+        lp = 0.06
+        self._ep   = self._ep   + (target_ep - self._ep) * lp
+        self._blob = [_lerp(self._blob[i], target_blob[i], lp) for i in range(5)]
+
+        # Rotation: base angle per ellipse + time drift, faster when excited
+        rot_speed = {
+            MascotState.IDLE:    0.15,
+            MascotState.AWARE:   0.25,
+            MascotState.LISTEN:  0.40,
+            MascotState.TOUCH:   0.60,
+            MascotState.EXCITED: 1.20,
+        }.get(state, 0.2)
+        rot_speed += self._bass * 0.8
+        self._rot_offs += rot_speed / self.fps
+
+        # ── GL render ─────────────────────────────────────────────────
+        self.ctx.clear(0.04, 0.04, 0.07, 1.0)
+
+        self.prog['u_time'].value  = t
+        self.prog['u_bass'].value  = self._bass
+        self.prog['u_mid'].value   = self._mid
+        self.prog['u_high'].value  = self._high
+        self.prog['u_vol'].value   = self._vol
+        self.prog['u_fft'].value   = tuple(self._bars)
+
+        asp = self.W / self.H
+        for i in range(6):
+            angle = self._ep[i, 4] + self._rot_offs[i]
+            self.prog[f'u_ep[{i}]'].value = (
+                float(self._ep[i,0]) * asp,
+                float(self._ep[i,1]),
+                float(self._ep[i,2]) * asp,
+                float(self._ep[i,3]),
+            )
+            self.prog[f'u_ea[{i}]'].value = float(angle)
+            self.prog[f'u_ec[{i}]'].value = tuple(ELLIPSE_COLORS[i].tolist())
+
+        self.prog['u_blob'].value = (
+            float(self._blob[0]) * asp,
+            float(self._blob[1]),
+            float(self._blob[2]) * asp,
+            float(self._blob[3]),
+        )
+        self.prog['u_bn'].value = float(self._blob[4])
+
+        self.vao.render(moderngl.TRIANGLE_STRIP)
+
+        # ── HUD overlay ───────────────────────────────────────────────
+        self._update_hud(state, face, self._vol, dframe)
+        self.hud_tex.use(0)
+        self.hud_prog['u_tex'].value = 0
+        self.hud_vao.render(moderngl.TRIANGLE_STRIP)
 
         pygame.display.flip()
 
@@ -276,6 +371,7 @@ class Renderer:
         import time as _time
         running = True
         start   = _time.monotonic()
+
         while running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -284,15 +380,14 @@ class Renderer:
                 elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     running = False
                 elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
-                    pos = getattr(event, "pos", None) or (
+                    pos = getattr(event, 'pos', None) or (
                         int(event.x * self.W), int(event.y * self.H))
                     self.bus.update(touch_active=True, touch_pos=pos)
                 elif event.type in (pygame.MOUSEBUTTONUP, pygame.FINGERUP):
                     self.bus.update(touch_active=False)
 
             self._t += 1.0 / self.fps
-            snap = self.bus.snapshot()
-            self.draw_frame(snap)
+            self.draw_frame(self.bus.snapshot())
             self.clock.tick(self.fps)
 
         pygame.quit()
