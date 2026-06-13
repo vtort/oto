@@ -193,24 +193,32 @@ class Renderer:
                 pygame.draw.circle(self.screen, c, (tx, ty), 5)
                 pygame.draw.circle(self.screen, (10, 10, 14), (tx, ty), 3)
 
+        # ── HUD: estado actual (esquina superior izquierda) ───────
+        font_hud = pygame.font.SysFont(None, 28)
+        state_label = f"STATE: {state.name}"
+        face_label  = "FACE: YES ✓" if face else "FACE: NO"
+        vol_label   = f"VOL: {int(snap['volume']*100):3d}%"
+        hud_lines   = [state_label, face_label, vol_label]
+        for i, line in enumerate(hud_lines):
+            col_hud = c if i == 0 else (80, 80, 80)
+            self.screen.blit(font_hud.render(line, True, col_hud), (10, 10 + i * 24))
+
         # ── Debug: camera preview (esquina inferior derecha) ──────
         debug_frame = snap.get("debug_frame")
         if debug_frame is not None:
             try:
                 import numpy as np
                 h, w = debug_frame.shape[:2]
-                scale = 160 / w
-                dw, dh = 160, int(h * scale)
-                small = cv2.resize(debug_frame, (dw, dh))
+                dw, dh = 160, int(h * 160 / w)
+                small     = cv2.resize(debug_frame, (dw, dh))
                 small_rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
                 surf = pygame.surfarray.make_surface(np.transpose(small_rgb, (1, 0, 2)))
                 dx = self.W - dw - 8
                 dy = self.H - dh - 8
                 pygame.draw.rect(self.screen, (30, 30, 30), (dx-2, dy-2, dw+4, dh+4))
                 self.screen.blit(surf, (dx, dy))
-                label = "CAM"
-                font = pygame.font.SysFont(None, 18)
-                self.screen.blit(font.render(label, True, (100, 100, 100)), (dx+2, dy+2))
+                font_cam = pygame.font.SysFont(None, 18)
+                self.screen.blit(font_cam.render("CAM", True, (100, 100, 100)), (dx+4, dy+4))
             except Exception:
                 pass
 
