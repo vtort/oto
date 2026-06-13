@@ -26,19 +26,24 @@ out vec4  fragColor;
 
 uniform vec2  u_res;
 
-uniform vec4  u_ep0; uniform float u_ea0; uniform vec3 u_ec0;
-uniform vec4  u_ep1; uniform float u_ea1; uniform vec3 u_ec1;
-uniform vec4  u_ep2; uniform float u_ea2; uniform vec3 u_ec2;
+uniform vec4  u_ep0; uniform float u_ea0; uniform vec3 u_ec0; uniform float u_eph0;
+uniform vec4  u_ep1; uniform float u_ea1; uniform vec3 u_ec1; uniform float u_eph1;
+uniform vec4  u_ep2; uniform float u_ea2; uniform vec3 u_ec2; uniform float u_eph2;
 
-float sdEllipse(vec2 p, vec2 cen, vec2 r, float ang) {
-    vec2 d = p - cen;
-    float c = cos(ang), s = sin(ang);
+// Blob orgánico: distorsión armónica en coordenadas polares.
+// sin(θ×3) → 3 esquinas suaves; sin(θ×5) añade textura secundaria.
+// El resultado rota con la elipse via `phase`.
+float blobMask(vec4 ep, float ea, vec2 p, float phase) {
+    vec2 d = p - ep.xy;
+    float c = cos(ea), s = sin(ea);
     vec2 q = vec2(c*d.x + s*d.y, -s*d.x + c*d.y);
-    return length(q / r) - 1.0;
-}
-
-float ellipseMask(vec4 ep, float ea, vec2 p) {
-    return 1.0 - smoothstep(-0.02, 0.02, sdEllipse(p, ep.xy, ep.zw, ea));
+    vec2 n = q / ep.zw;
+    float theta = atan(n.y, n.x);
+    float r = length(n);
+    float warp = 1.0
+        + 0.11 * sin(theta * 3.0 + phase)
+        + 0.04 * sin(theta * 5.0 + phase * 1.5);
+    return 1.0 - smoothstep(-0.022, 0.022, r / warp - 1.0);
 }
 
 void main() {
@@ -47,9 +52,9 @@ void main() {
 
     vec3 col = vec3(0.04, 0.04, 0.07);
 
-    float m0 = ellipseMask(u_ep0, u_ea0, p);
-    float m1 = ellipseMask(u_ep1, u_ea1, p);
-    float m2 = ellipseMask(u_ep2, u_ea2, p);
+    float m0 = blobMask(u_ep0, u_ea0, p, u_eph0);
+    float m1 = blobMask(u_ep1, u_ea1, p, u_eph1);
+    float m2 = blobMask(u_ep2, u_ea2, p, u_eph2);
 
     // Screen blend: blanco donde los 3 se solapan, colores mixtos donde 2 se solapan
     vec3 scr = vec3(0.0);
@@ -310,6 +315,8 @@ class Renderer:
             )
             self.prog[f'u_ea{i}'].value = float(angle)
             self.prog[f'u_ec{i}'].value = tuple(ELLIPSE_COLORS[i].tolist())
+            # Phase para la distorsión armónica — cada elipse usa una offset distinta
+            self.prog[f'u_eph{i}'].value = float(angle * 1.0 + i * 2.094)
 
         self.vao.render(moderngl.TRIANGLE_STRIP)
 
