@@ -38,11 +38,11 @@ class StateMachine:
         bass   = snap["bass"]
         touch  = snap["touch_active"]
         idle_th = self.cfg["audio"]["idle_threshold"]
-        listen_th = idle_th * 15.0  # solo voz real, no ruido ambiente
+        listen_th = idle_th * 35.0  # umbral alto — solo voz clara
 
         if touch:
             new = MascotState.TOUCH
-        elif bass > 0.85 or volume > listen_th:
+        elif volume > listen_th:
             new = MascotState.LISTEN
         else:
             new = MascotState.IDLE
