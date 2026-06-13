@@ -209,10 +209,10 @@ class Renderer:
         # ── HUD overlay program ───────────────────────────────────────
         self.hud_prog = self.ctx.program(vertex_shader=HUD_VERT, fragment_shader=HUD_FRAG)
         hud_verts = np.array([
-            -1,-1, 0,1,
-             1,-1, 1,1,
-            -1, 1, 0,0,
-             1, 1, 1,0,
+            -1,-1, 0,0,
+             1,-1, 1,0,
+            -1, 1, 0,1,
+             1, 1, 1,1,
         ], dtype=np.float32)
         self.hud_vbo = self.ctx.buffer(hud_verts)
         self.hud_vao = self.ctx.simple_vertex_array(
@@ -269,7 +269,7 @@ class Renderer:
             except Exception:
                 pass
 
-        data = pygame.image.tostring(self.hud_surf, 'RGBA', True)
+        data = pygame.image.tostring(self.hud_surf, 'RGBA', False)
         self.hud_tex.write(data)
 
     def draw_frame(self, snap):
