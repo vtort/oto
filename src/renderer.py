@@ -29,9 +29,6 @@ uniform vec2  u_res;
 uniform vec4  u_ep0; uniform float u_ea0; uniform vec3 u_ec0;
 uniform vec4  u_ep1; uniform float u_ea1; uniform vec3 u_ec1;
 uniform vec4  u_ep2; uniform float u_ea2; uniform vec3 u_ec2;
-uniform vec4  u_ep3; uniform float u_ea3; uniform vec3 u_ec3;
-uniform vec4  u_ep4; uniform float u_ea4; uniform vec3 u_ec4;
-uniform vec4  u_ep5; uniform float u_ea5; uniform vec3 u_ec5;
 
 uniform vec4  u_blob;
 uniform float u_bn;
@@ -59,9 +56,6 @@ void main() {
     scr = screenBlend(scr, u_ep0, u_ea0, u_ec0, p);
     scr = screenBlend(scr, u_ep1, u_ea1, u_ec1, p);
     scr = screenBlend(scr, u_ep2, u_ea2, u_ec2, p);
-    scr = screenBlend(scr, u_ep3, u_ea3, u_ec3, p);
-    scr = screenBlend(scr, u_ep4, u_ea4, u_ec4, p);
-    scr = screenBlend(scr, u_ep5, u_ea5, u_ec5, p);
 
     float presence = (scr.r + scr.g + scr.b) * 0.333;
     col = mix(col, scr, clamp(presence * 3.0, 0.0, 1.0));
@@ -105,63 +99,46 @@ void main() {
 
 # ── State configurations ───────────────────────────────────────────────────────
 
-# Colors: blue, red, green, orange, cyan, pink — matching the Figma palette
+# 3 colores principales del Figma: azul, rojo-naranja, verde
 ELLIPSE_COLORS = np.array([
-    [0.00, 0.47, 1.00],
-    [1.00, 0.15, 0.12],
-    [0.10, 0.82, 0.30],
-    [1.00, 0.55, 0.00],
-    [0.20, 0.85, 0.95],
-    [1.00, 0.10, 0.55],
+    [0.10, 0.40, 1.00],
+    [1.00, 0.22, 0.05],
+    [0.05, 0.88, 0.38],
 ], dtype=np.float32)
 
-# Per state: 6 × (cx, cy, rx, ry, angle_base)
-# cx/cy in aspect-corrected space (aspect ≈ 1.667 for 800×480)
+N_ELLIPSES = 3
+
+# Per state: 3 × (cx, cy, rx, ry, angle_base)
+# Cada elipse separada ~120° del centro, muy juntas para que se solapen mucho
 _S = {
-    # cx/cy pequeños = pegadas al centro, rx≈ry = circulares
     MascotState.IDLE: np.array([
-        [ 0.00,  0.05, 0.32, 0.30,  0.00],
-        [-0.08, -0.04, 0.30, 0.29,  1.05],
-        [ 0.07,  0.04, 0.31, 0.30,  2.10],
-        [-0.06,  0.07, 0.29, 0.28,  3.15],
-        [ 0.08, -0.06, 0.30, 0.29,  4.20],
-        [-0.04,  0.02, 0.28, 0.27,  5.25],
+        [ 0.00,  0.10, 0.30, 0.30,  0.00],
+        [-0.09, -0.05, 0.30, 0.30,  2.09],
+        [ 0.09, -0.05, 0.30, 0.30,  4.19],
     ], dtype=np.float32),
 
     MascotState.AWARE: np.array([
-        [ 0.00,  0.04, 0.36, 0.34,  0.00],
-        [-0.10, -0.04, 0.34, 0.33,  1.05],
-        [ 0.09,  0.05, 0.35, 0.34,  2.10],
-        [-0.07,  0.09, 0.33, 0.32,  3.15],
-        [ 0.10, -0.07, 0.34, 0.33,  4.20],
-        [-0.05,  0.02, 0.32, 0.31,  5.25],
+        [ 0.00,  0.12, 0.33, 0.33,  0.00],
+        [-0.10, -0.06, 0.33, 0.33,  2.09],
+        [ 0.10, -0.06, 0.33, 0.33,  4.19],
     ], dtype=np.float32),
 
     MascotState.LISTEN: np.array([
-        [ 0.00,  0.00, 0.38, 0.28,  0.00],
-        [-0.12,  0.00, 0.36, 0.27,  1.05],
-        [ 0.11,  0.02, 0.37, 0.27,  2.10],
-        [-0.08,  0.04, 0.35, 0.26,  3.15],
-        [ 0.09, -0.03, 0.36, 0.27,  4.20],
-        [-0.05,  0.01, 0.33, 0.25,  5.25],
+        [ 0.00,  0.07, 0.36, 0.26,  0.00],
+        [-0.13, -0.04, 0.34, 0.25,  2.09],
+        [ 0.13, -0.04, 0.34, 0.25,  4.19],
     ], dtype=np.float32),
 
     MascotState.TOUCH: np.array([
-        [ 0.02,  0.06, 0.34, 0.33,  0.50],
-        [-0.10,  0.06, 0.32, 0.32,  1.55],
-        [ 0.10,  0.04, 0.33, 0.33,  2.60],
-        [-0.07,  0.10, 0.31, 0.31,  3.65],
-        [ 0.09, -0.08, 0.32, 0.32,  4.70],
-        [-0.04,  0.02, 0.30, 0.30,  5.75],
+        [ 0.00,  0.12, 0.32, 0.32,  0.50],
+        [-0.10, -0.06, 0.32, 0.32,  2.59],
+        [ 0.10, -0.06, 0.32, 0.32,  4.69],
     ], dtype=np.float32),
 
     MascotState.EXCITED: np.array([
-        [ 0.00,  0.00, 0.38, 0.36,  0.00],
-        [-0.14, -0.06, 0.36, 0.35,  1.05],
-        [ 0.13,  0.07, 0.37, 0.36,  2.10],
-        [-0.09,  0.12, 0.35, 0.34,  3.15],
-        [ 0.11, -0.10, 0.36, 0.35,  4.20],
-        [-0.06,  0.03, 0.34, 0.33,  5.25],
+        [ 0.00,  0.14, 0.36, 0.36,  0.00],
+        [-0.12, -0.07, 0.36, 0.36,  2.09],
+        [ 0.12, -0.07, 0.36, 0.36,  4.19],
     ], dtype=np.float32),
 }
 
@@ -228,14 +205,15 @@ class Renderer:
 
         # ── Smooth state ──────────────────────────────────────────────
         self._t        = 0.0
-        self._ep       = _S[MascotState.IDLE].copy()   # current ellipse params
+        self._ep       = _S[MascotState.IDLE].copy()
+        self._n_ep     = N_ELLIPSES
         self._blob     = list(_BLOB[MascotState.IDLE])
         self._vol      = 0.0
         self._bass     = 0.0
         self._mid      = 0.0
         self._high     = 0.0
         self._bars     = [0.0] * 16
-        self._rot_offs = np.zeros(6, dtype=np.float32)  # individual rotation drift
+        self._rot_offs = np.zeros(N_ELLIPSES, dtype=np.float32)
 
     def _update_hud(self, state, face, volume, debug_frame):
         self.hud_surf.fill((0, 0, 0, 0))
@@ -298,7 +276,7 @@ class Renderer:
 
         # Audio deformation: bass escala suavemente, high add wobble sutil
         scale = 1.0 + self._bass * 0.12 + self._vol * 0.05
-        for i in range(6):
+        for i in range(N_ELLIPSES):
             target_ep[i, 2] *= scale
             target_ep[i, 3] *= scale
             target_ep[i, 2] += self._high * 0.02 * math.sin(t * 2.5 + i * 1.1)
@@ -329,7 +307,7 @@ class Renderer:
         self.ctx.clear(0.04, 0.04, 0.07, 1.0)
 
         asp = self.W / self.H
-        for i in range(6):
+        for i in range(N_ELLIPSES):
             angle = self._ep[i, 4] + self._rot_offs[i]
             self.prog[f'u_ep{i}'].value = (
                 float(self._ep[i,0]) * asp,
