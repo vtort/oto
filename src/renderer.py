@@ -25,11 +25,16 @@ in  vec2  v_uv;
 out vec4  fragColor;
 
 uniform vec2  u_res;
-uniform vec4  u_ep[6];   // cx, cy, rx, ry  (aspect-corrected space)
-uniform float u_ea[6];   // rotation angle per ellipse
-uniform vec3  u_ec[6];   // rgb per ellipse
-uniform vec4  u_blob;    // cx, cy, rx, ry
-uniform float u_bn;      // superellipse power
+
+uniform vec4  u_ep0; uniform float u_ea0; uniform vec3 u_ec0;
+uniform vec4  u_ep1; uniform float u_ea1; uniform vec3 u_ec1;
+uniform vec4  u_ep2; uniform float u_ea2; uniform vec3 u_ec2;
+uniform vec4  u_ep3; uniform float u_ea3; uniform vec3 u_ec3;
+uniform vec4  u_ep4; uniform float u_ea4; uniform vec3 u_ec4;
+uniform vec4  u_ep5; uniform float u_ea5; uniform vec3 u_ec5;
+
+uniform vec4  u_blob;
+uniform float u_bn;
 
 float sdEllipse(vec2 p, vec2 cen, vec2 r, float ang) {
     vec2 d = p - cen;
@@ -38,34 +43,35 @@ float sdEllipse(vec2 p, vec2 cen, vec2 r, float ang) {
     return length(q / r) - 1.0;
 }
 
-float superEllipse(vec2 p, vec2 cen, vec2 r, float n) {
-    vec2 q = (p - cen) / r;
-    return pow(abs(q.x), n) + pow(abs(q.y), n) - 1.0;
+vec3 screenBlend(vec3 acc, vec4 ep, float ea, vec3 ec, vec2 p) {
+    float d = sdEllipse(p, ep.xy, ep.zw, ea);
+    float m = 1.0 - smoothstep(-0.025, 0.025, d);
+    return 1.0 - (1.0 - acc) * (1.0 - ec * m);
 }
 
 void main() {
     float asp = u_res.x / u_res.y;
     vec2 p = (v_uv * 2.0 - 1.0) * vec2(asp, 1.0);
 
-    // Background
     vec3 col = vec3(0.04, 0.04, 0.07);
 
-    // Screen-blend 6 ellipses
     vec3 scr = vec3(0.0);
-    for (int i = 0; i < 6; i++) {
-        float d = sdEllipse(p, u_ep[i].xy, u_ep[i].zw, u_ea[i]);
-        float m = 1.0 - smoothstep(-0.025, 0.025, d);
-        scr = 1.0 - (1.0 - scr) * (1.0 - u_ec[i] * m);
-    }
+    scr = screenBlend(scr, u_ep0, u_ea0, u_ec0, p);
+    scr = screenBlend(scr, u_ep1, u_ea1, u_ec1, p);
+    scr = screenBlend(scr, u_ep2, u_ea2, u_ec2, p);
+    scr = screenBlend(scr, u_ep3, u_ea3, u_ec3, p);
+    scr = screenBlend(scr, u_ep4, u_ea4, u_ec4, p);
+    scr = screenBlend(scr, u_ep5, u_ea5, u_ec5, p);
+
     float presence = (scr.r + scr.g + scr.b) * 0.333;
     col = mix(col, scr, clamp(presence * 3.0, 0.0, 1.0));
 
-    // White central blob (superellipse morphs by state)
-    float bf = superEllipse(p, u_blob.xy, u_blob.zw, u_bn);
+    // White central superellipse blob
+    vec2 bq = (p - u_blob.xy) / u_blob.zw;
+    float bf = pow(abs(bq.x), u_bn) + pow(abs(bq.y), u_bn) - 1.0;
     float bm = 1.0 - smoothstep(-0.04, 0.04, bf);
     col = mix(col, vec3(1.0), bm);
 
-    // Vignette
     vec2 vd = v_uv - 0.5;
     col *= 1.0 - dot(vd, vd) * 1.4;
 
@@ -325,14 +331,14 @@ class Renderer:
         asp = self.W / self.H
         for i in range(6):
             angle = self._ep[i, 4] + self._rot_offs[i]
-            self.prog[f'u_ep[{i}]'].value = (
+            self.prog[f'u_ep{i}'].value = (
                 float(self._ep[i,0]) * asp,
                 float(self._ep[i,1]),
                 float(self._ep[i,2]) * asp,
                 float(self._ep[i,3]),
             )
-            self.prog[f'u_ea[{i}]'].value = float(angle)
-            self.prog[f'u_ec[{i}]'].value = tuple(ELLIPSE_COLORS[i].tolist())
+            self.prog[f'u_ea{i}'].value = float(angle)
+            self.prog[f'u_ec{i}'].value = tuple(ELLIPSE_COLORS[i].tolist())
 
         self.prog['u_blob'].value = (
             float(self._blob[0]) * asp,
