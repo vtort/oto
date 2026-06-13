@@ -177,11 +177,15 @@ class Renderer:
         pygame.display.flip()
 
     def run(self):
+        import time as _time
         running = True
+        start = _time.monotonic()
         while running:
             for event in pygame.event.get():
+                # Ignore QUIT events in the first 2 seconds (spurious on Pi)
                 if event.type == pygame.QUIT:
-                    running = False
+                    if _time.monotonic() - start > 2.0:
+                        running = False
                 elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     running = False
                 elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
