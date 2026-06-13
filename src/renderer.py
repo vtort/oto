@@ -186,6 +186,7 @@ class Renderer:
         self._t        = 0.0
         self._ep       = _S[MascotState.IDLE].copy()
         self._n_ep     = N_ELLIPSES
+        self._drag     = np.array([0.0, 0.0], dtype=np.float32)  # offset arrastre
         self._vol      = 0.0
         self._bass     = 0.0
         self._mid      = 0.0
@@ -265,6 +266,20 @@ class Renderer:
         lp = 0.18 if state == MascotState.TOUCH else 0.06
         self._ep = self._ep + (target_ep - self._ep) * lp
 
+        # ── Drag: sigue el dedo, vuelve al centro al soltar ──────────
+        touch_pos = snap.get("touch_pos", (self.W/2, self.H/2))
+        if state == MascotState.TOUCH:
+            # Convertir píxeles → coordenadas normalizadas (-1..1, y invertida)
+            tx = (touch_pos[0] / self.W - 0.5) * 2.0
+            ty = -((touch_pos[1] / self.H - 0.5) * 2.0)
+            # Limitar el arrastre para que no salga de pantalla
+            tx = max(-0.6, min(0.6, tx))
+            ty = max(-0.6, min(0.6, ty))
+            target_drag = np.array([tx, ty], dtype=np.float32)
+            self._drag += (target_drag - self._drag) * 0.25  # sigue rápido
+        else:
+            self._drag += (np.array([0.0, 0.0]) - self._drag) * 0.025  # vuelve lento
+
         # Rotation: base angle per ellipse + time drift, faster when excited
         rot_speed = {
             MascotState.IDLE:    0.008,
@@ -286,8 +301,8 @@ class Renderer:
             # pasar r igual en x e y da un círculo perfecto en píxeles reales
             r = (float(self._ep[i,2]) + float(self._ep[i,3])) * 0.5
             self.prog[f'u_ep{i}'].value = (
-                float(self._ep[i,0]) * asp,
-                float(self._ep[i,1]),
+                float(self._ep[i,0]) * asp + self._drag[0] * asp,
+                float(self._ep[i,1]) + self._drag[1],
                 r,
                 r,
             )
