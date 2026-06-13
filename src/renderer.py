@@ -131,8 +131,8 @@ _S = {
 # AWARE: h4 grande → 4 pétalos redondeados tipo flor
 _H = {
     MascotState.IDLE:    (0.07, 0.05, 0.03),
-    MascotState.AWARE:   (0.02, 0.03, 0.18),
-    MascotState.LISTEN:  (0.07, 0.05, 0.03),
+    MascotState.AWARE:   (0.07, 0.05, 0.03),
+    MascotState.LISTEN:  (0.02, 0.03, 0.18),  # pétalos al escuchar
     MascotState.TOUCH:   (0.03, 0.02, 0.01),
     MascotState.EXCITED: (0.08, 0.06, 0.04),
 }

@@ -31,7 +31,7 @@ class StateMachine:
         cool_t  = self.cfg["states"]["excited_cooldown_s"]
         idle_th = self.cfg["audio"]["idle_threshold"]
 
-        listen_th = idle_th * 4.0  # umbral más alto para LISTEN — evita falsos positivos
+        listen_th = idle_th * 15.0  # umbral alto — solo voz real, no ruido ambiente
 
         # Priority order (highest first)
         if touch:
