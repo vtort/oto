@@ -73,8 +73,10 @@ class VisionThread(threading.Thread):
                 gray,
                 scaleFactor  = self.scale,
                 minNeighbors = self.neighbors,
-                minSize      = (40, 40),
+                minSize      = (30, 30),
+                flags        = cv2.CASCADE_SCALE_IMAGE,
             )
+            print(f"[vision] frame {frame.shape} faces={len(faces)}", flush=True)
 
             # Dibuja rectángulos en el frame para el debug overlay
             debug_frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)

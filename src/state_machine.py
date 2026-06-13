@@ -39,10 +39,12 @@ class StateMachine:
         elif bass > 0.7 or volume > 0.8:
             new = MascotState.EXCITED
             self._excited_until = now + cool_t
-        elif volume > idle_th:
-            new = MascotState.LISTEN
+        elif face and volume > idle_th:
+            new = MascotState.LISTEN   # cara + audio → LISTEN con ojos abiertos
         elif face:
-            new = MascotState.AWARE
+            new = MascotState.AWARE    # cara sin audio → AWARE
+        elif volume > idle_th:
+            new = MascotState.LISTEN   # solo audio → LISTEN
         else:
             new = MascotState.IDLE
 

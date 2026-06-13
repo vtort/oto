@@ -122,7 +122,8 @@ class Renderer:
         self._blink_t += 1 / self.fps
         blinking = math.sin(self._blink_t * 0.25) > 0.97
 
-        eye_spread = 28 if state == MascotState.AWARE else 24
+        face = snap.get("face_detected", False)
+        eye_spread = 28 if (state == MascotState.AWARE or face) else 24
         ey = cy - 10
 
         for side in (-1, 1):
@@ -133,11 +134,13 @@ class Renderer:
             else:
                 eye_h = {
                     MascotState.IDLE:    8,
-                    MascotState.AWARE:   13,
+                    MascotState.AWARE:   14,
                     MascotState.LISTEN:  11,
                     MascotState.TOUCH:   10,
                     MascotState.EXCITED: 15,
                 }.get(state, 10)
+                if face and eye_h < 14:
+                    eye_h = 14  # cara detectada → ojos siempre bien abiertos
 
                 # Eye white
                 pygame.draw.ellipse(self.screen, c,
