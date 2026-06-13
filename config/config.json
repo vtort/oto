@@ -1,0 +1,35 @@
+{
+  "display": {
+    "width": 800,
+    "height": 480,
+    "fps": 60,
+    "fullscreen": true
+  },
+  "audio": {
+    "sample_rate": 44100,
+    "chunk_size": 1024,
+    "device_index": null,
+    "fft_bands": {
+      "bass":   [20,   250],
+      "mid":    [250,  4000],
+      "high":   [4000, 20000]
+    },
+    "sensitivity": 1.0,
+    "idle_threshold": 0.02
+  },
+  "mascot": {
+    "name": "OTO",
+    "body_radius": 80,
+    "idle_breathe_speed": 0.8,
+    "react_breathe_speed": 2.5,
+    "color_idle":    "#6366f1",
+    "color_aware":   "#38bdf8",
+    "color_listen":  "#4ade80",
+    "color_touch":   "#fb923c",
+    "color_excited": "#f43f5e"
+  },
+  "states": {
+    "idle_timeout_s": 10,
+    "excited_cooldown_s": 3
+  }
+}
