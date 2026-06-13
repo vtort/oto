@@ -40,9 +40,11 @@ float blobMask(vec4 ep, float ea, vec2 p, float phase) {
     vec2 n = q / ep.zw;
     float theta = atan(n.y, n.x);
     float r = length(n);
+    // Frecuencias bajas → forma tipo guijarro/espejo orgánico
     float warp = 1.0
-        + 0.06 * sin(theta * 3.0 + phase)
-        + 0.02 * sin(theta * 5.0 + phase * 1.5);
+        + 0.14 * sin(theta * 1.0 + phase)
+        + 0.07 * sin(theta * 2.0 + phase * 0.6)
+        + 0.03 * sin(theta * 3.0 + phase * 1.3);
     return 1.0 - smoothstep(-0.022, 0.022, r / warp - 1.0);
 }
 
