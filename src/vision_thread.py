@@ -1,11 +1,27 @@
 import threading
+import os
 import cv2
 import numpy as np
 
 from state import StateBus
 
-# Haar cascade viene incluida con opencv
-FACE_CASCADE = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+# Busca el cascade en varias ubicaciones según distro
+def _find_cascade():
+    candidates = [
+        "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml",
+        "/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml",
+        "/usr/local/share/opencv4/haarcascades/haarcascade_frontalface_default.xml",
+    ]
+    try:
+        candidates.insert(0, cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    except AttributeError:
+        pass
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError("haarcascade_frontalface_default.xml no encontrado")
+
+FACE_CASCADE = cv2.CascadeClassifier(_find_cascade())
 
 
 class VisionThread(threading.Thread):
