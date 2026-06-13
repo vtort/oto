@@ -277,7 +277,11 @@ class Renderer:
 
         # Lerp armónicos → transición suave de forma al cambiar estado
         target_h = np.array(_H[state], dtype=np.float32)
-        self._harmonics += (target_h - self._harmonics) * 0.04
+        # En LISTEN: los pétalos (h4) pulsan con volumen y mid
+        if state == MascotState.LISTEN:
+            audio_pulse = self._vol * 0.20 + self._mid * 0.12
+            target_h[2] = _H[MascotState.LISTEN][2] + audio_pulse
+        self._harmonics += (target_h - self._harmonics) * 0.08
 
 
         # ── Drag: delta desde donde empezó el toque, vuelve al soltar ─
@@ -305,6 +309,8 @@ class Renderer:
             MascotState.TOUCH:   0.030,
             MascotState.EXCITED: 0.055,
         }.get(state, 0.010)
+        if state == MascotState.LISTEN:
+            rot_speed += self._vol * 0.04 + self._mid * 0.03
         rot_speed += self._bass * 0.02
         self._rot_offs += rot_speed / self.fps
 
