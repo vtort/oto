@@ -38,7 +38,7 @@ class StateMachine:
             new = MascotState.TOUCH
         elif now < self._excited_until:
             new = MascotState.EXCITED
-        elif bass > 0.7 or volume > 0.8:
+        elif bass > 0.85 or volume > 0.90:
             new = MascotState.EXCITED
             self._excited_until = now + cool_t
         elif face and volume > listen_th:

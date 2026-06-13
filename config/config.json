@@ -38,6 +38,6 @@
   },
   "states": {
     "idle_timeout_s": 10,
-    "excited_cooldown_s": 3
+    "excited_cooldown_s": 1
   }
 }
