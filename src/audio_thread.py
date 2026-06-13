@@ -65,8 +65,9 @@ class AudioThread(threading.Thread):
                 # 16 log-spaced bars across full spectrum
                 log_edges = np.logspace(np.log10(20), np.log10(20000), n_bars + 1)
                 bars = [band_energy(fft_n, log_edges[i], log_edges[i+1]) for i in range(n_bars)]
-                # smooth + clip
-                bars = [min(1.0, b * 3.0) for b in bars]
+                # Progressive gain: lows×3, mids×5, highs×12 — compensates mic rolloff
+                gains = np.linspace(3.0, 12.0, n_bars)
+                bars = [min(1.0, b * gains[i]) for i, b in enumerate(bars)]
 
                 self.bus.update(
                     volume=min(1.0, rms * 20),
