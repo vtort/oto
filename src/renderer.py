@@ -296,11 +296,11 @@ class Renderer:
         # Rotation: base angle per ellipse + time drift, faster when excited
         rot_speed = {
             MascotState.IDLE:   0.008,
-            MascotState.LISTEN: 0.022,
+            MascotState.LISTEN: 0.06,
             MascotState.TOUCH:  0.030,
         }.get(state, 0.010)
         if state == MascotState.LISTEN:
-            rot_speed += self._vol * 0.04 + self._mid * 0.03
+            rot_speed += self._vol * 0.18 + self._mid * 0.10
         rot_speed += self._bass * 0.02
         self._rot_offs += rot_speed / self.fps
 
