@@ -9,7 +9,7 @@ from state import MascotState, StateBus
 # ── Shaders ───────────────────────────────────────────────────────────────────
 
 VERT = """
-#version 310 es
+#version 300 es
 in vec2 in_vert;
 out vec2 v_uv;
 void main() {
@@ -19,7 +19,7 @@ void main() {
 """
 
 FRAG = """
-#version 310 es
+#version 300 es
 precision highp float;
 in  vec2  v_uv;
 out vec4  fragColor;
@@ -83,7 +83,7 @@ void main() {
 
 # Overlay quad for HUD texture
 HUD_VERT = """
-#version 310 es
+#version 300 es
 in vec2 in_vert;
 in vec2 in_uv;
 out vec2 v_uv;
@@ -94,7 +94,7 @@ void main() {
 """
 
 HUD_FRAG = """
-#version 310 es
+#version 300 es
 precision mediump float;
 in  vec2      v_uv;
 out vec4      fragColor;
@@ -198,7 +198,7 @@ class Renderer:
         self.clock = pygame.time.Clock()
 
         # ── ModernGL context ──────────────────────────────────────────
-        self.ctx = moderngl.create_context(require=310)
+        self.ctx = moderngl.create_context(require=300)
         self.ctx.enable(moderngl.BLEND)
         self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
 
