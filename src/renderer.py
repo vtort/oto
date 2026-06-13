@@ -284,16 +284,17 @@ class Renderer:
         asp = self.W / self.H
         for i in range(N_ELLIPSES):
             angle = self._ep[i, 4] + self._rot_offs[i]
+            # Forzar radio único (promedio rx/ry) → círculo perfecto en pantalla
+            r = (float(self._ep[i,2]) + float(self._ep[i,3])) * 0.5
             self.prog[f'u_ep{i}'].value = (
                 float(self._ep[i,0]) * asp,
                 float(self._ep[i,1]),
-                float(self._ep[i,2]) * asp,
-                float(self._ep[i,3]),
+                r * asp,
+                r,
             )
             self.prog[f'u_ea{i}'].value = float(angle)
             self.prog[f'u_ec{i}'].value = tuple(ELLIPSE_COLORS[i].tolist())
-            # Phase para la distorsión armónica — cada elipse usa una offset distinta
-            self.prog[f'u_eph{i}'].value = float(angle * 1.0 + i * 2.094)
+            self.prog[f'u_eph{i}'].value = float(angle + i * 2.094)
 
         self.vao.render(moderngl.TRIANGLE_STRIP)
 
