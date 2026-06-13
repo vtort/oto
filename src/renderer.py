@@ -116,23 +116,20 @@ N_ELLIPSES = 3
 # Cada fila: (cx, cy, rx, ry, angle_base)
 # Formas base compactas y casi redondas — el estiramiento solo viene del audio
 _R = 0.30   # radio base — rx=ry siempre para no estirar en reposo
-_O = 0.065  # offset centro desde origen
-
-def _ep(o, r, a): return [o[0], o[1], r, r, a]
-
-_POS = [
-    ( 0.000,  _O),
-    (-_O*0.87, -_O*0.50),
-    ( _O*0.87, -_O*0.50),
-]
+_O = 0.065  # offset normal
 _ANGLES = [0.20, 2.30, 4.00]
 
+def _pos(o): return [(0.000, o), (-o*0.87, -o*0.50), (o*0.87, -o*0.50)]
+def _state(o, r): return np.array([[*p, r, r, a] for p, a in zip(_pos(o), _ANGLES)], dtype=np.float32)
+
 _S = {
-    MascotState.IDLE:    np.array([_ep(_POS[i], _R,       _ANGLES[i]) for i in range(3)], dtype=np.float32),
-    MascotState.AWARE:   np.array([_ep(_POS[i], _R+.01,   _ANGLES[i]) for i in range(3)], dtype=np.float32),
-    MascotState.LISTEN:  np.array([_ep(_POS[i], _R+.02,   _ANGLES[i]) for i in range(3)], dtype=np.float32),
-    MascotState.TOUCH:   np.array([_ep(_POS[i], _R+.02,   _ANGLES[i]) for i in range(3)], dtype=np.float32),
-    MascotState.EXCITED: np.array([_ep(_POS[i], _R+.04,   _ANGLES[i]) for i in range(3)], dtype=np.float32),
+    MascotState.IDLE:    _state(_O,       _R),
+    MascotState.AWARE:   _state(_O,       _R+.01),
+    MascotState.LISTEN:  _state(_O,       _R+.02),
+    # TOUCH: centros casi en el origen → prácticamente todo blanco
+    MascotState.TOUCH:   _state(0.008,    _R+.02),
+    MascotState.EXCITED: _state(_O*1.3,   _R+.04),
+}
 }
 
 def _lerp(a, b, t):
@@ -265,8 +262,8 @@ class Renderer:
             target_ep[i, 2] *= bass_scale
             target_ep[i, 3] *= bass_scale
 
-        # Lerp current → target
-        lp = 0.06
+        # Lerp más rápido en TOUCH para respuesta inmediata al usuario
+        lp = 0.18 if state == MascotState.TOUCH else 0.06
         self._ep = self._ep + (target_ep - self._ep) * lp
 
         # Rotation: base angle per ellipse + time drift, faster when excited
