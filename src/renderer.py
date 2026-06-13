@@ -265,26 +265,23 @@ class Renderer:
         # Target ellipse config
         target_ep = _S[state].copy()
 
-        # Respiración orgánica: cada elipse oscila rx/ry con fase y frecuencia distintas
-        # Las frecuencias son irracionales entre sí → nunca se sincronizan del todo
+        # Respiración orgánica suave — amplitud pequeña, frecuencias bajas
         _breathe = [
-            (0.73, 1.10, 0.0),   # (freq_rx, freq_ry, phase)
-            (0.91, 0.67, 1.3),
-            (0.58, 0.83, 2.7),
+            (0.18, 0.23, 0.0),
+            (0.21, 0.16, 1.3),
+            (0.14, 0.19, 2.7),
         ]
-        breathe_amp = 0.022
+        breathe_amp = 0.010
         for i in range(N_ELLIPSES):
             fr, fy, ph = _breathe[i]
             target_ep[i, 2] += breathe_amp * math.sin(t * fr + ph)
             target_ep[i, 3] += breathe_amp * math.cos(t * fy + ph)
 
-        # Audio: bass escala, high wobble
-        scale = 1.0 + self._bass * 0.12 + self._vol * 0.05
+        # Audio: influencia muy sutil
+        scale = 1.0 + self._bass * 0.05 + self._vol * 0.02
         for i in range(N_ELLIPSES):
             target_ep[i, 2] *= scale
             target_ep[i, 3] *= scale
-            target_ep[i, 2] += self._high * 0.018 * math.sin(t * 3.1 + i * 1.4)
-            target_ep[i, 3] += self._high * 0.018 * math.cos(t * 2.8 + i * 1.1)
 
         # Lerp current → target
         lp = 0.06
@@ -292,13 +289,13 @@ class Renderer:
 
         # Rotation: base angle per ellipse + time drift, faster when excited
         rot_speed = {
-            MascotState.IDLE:    0.06,
-            MascotState.AWARE:   0.10,
-            MascotState.LISTEN:  0.16,
-            MascotState.TOUCH:   0.22,
-            MascotState.EXCITED: 0.45,
-        }.get(state, 0.08)
-        rot_speed += self._bass * 0.25
+            MascotState.IDLE:    0.008,
+            MascotState.AWARE:   0.014,
+            MascotState.LISTEN:  0.022,
+            MascotState.TOUCH:   0.030,
+            MascotState.EXCITED: 0.055,
+        }.get(state, 0.010)
+        rot_speed += self._bass * 0.02
         self._rot_offs += rot_speed / self.fps
 
         # ── GL render ─────────────────────────────────────────────────
