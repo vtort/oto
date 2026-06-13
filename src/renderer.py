@@ -41,8 +41,8 @@ float blobMask(vec4 ep, float ea, vec2 p, float phase) {
     float theta = atan(n.y, n.x);
     float r = length(n);
     float warp = 1.0
-        + 0.03 * sin(theta * 3.0 + phase)
-        + 0.01 * sin(theta * 5.0 + phase * 1.5);
+        + 0.06 * sin(theta * 3.0 + phase)
+        + 0.02 * sin(theta * 5.0 + phase * 1.5);
     return 1.0 - smoothstep(-0.022, 0.022, r / warp - 1.0);
 }
 
@@ -113,39 +113,24 @@ N_ELLIPSES = 3
 # Cada elipse separada ~120° del centro, muy juntas para que se solapen mucho
 # Cada fila: (cx, cy, rx, ry, angle_base)
 # Formas base compactas y casi redondas — el estiramiento solo viene del audio
-_R = 0.30   # radio base
+_R = 0.30   # radio base — rx=ry siempre para no estirar en reposo
 _O = 0.065  # offset centro desde origen
 
+def _ep(o, r, a): return [o[0], o[1], r, r, a]
+
+_POS = [
+    ( 0.000,  _O),
+    (-_O*0.87, -_O*0.50),
+    ( _O*0.87, -_O*0.50),
+]
+_ANGLES = [0.20, 2.30, 4.00]
+
 _S = {
-    MascotState.IDLE: np.array([
-        [ 0.000,  _O,    _R,    _R,    0.20],
-        [-_O*0.87, -_O*0.50, _R, _R,  2.30],
-        [ _O*0.87, -_O*0.50, _R, _R,  4.00],
-    ], dtype=np.float32),
-
-    MascotState.AWARE: np.array([
-        [ 0.000,  _O,    _R+.01, _R+.01, 0.20],
-        [-_O*0.87, -_O*0.50, _R+.01, _R+.01, 2.30],
-        [ _O*0.87, -_O*0.50, _R+.01, _R+.01, 4.00],
-    ], dtype=np.float32),
-
-    MascotState.LISTEN: np.array([
-        [ 0.000,  _O,    _R+.02, _R+.02, 0.20],
-        [-_O*0.87, -_O*0.50, _R+.02, _R+.02, 2.30],
-        [ _O*0.87, -_O*0.50, _R+.02, _R+.02, 4.00],
-    ], dtype=np.float32),
-
-    MascotState.TOUCH: np.array([
-        [ 0.000,  _O,    _R+.02, _R+.02, 0.70],
-        [-_O*0.87, -_O*0.50, _R+.02, _R+.02, 2.79],
-        [ _O*0.87, -_O*0.50, _R+.02, _R+.02, 4.89],
-    ], dtype=np.float32),
-
-    MascotState.EXCITED: np.array([
-        [ 0.000,  _O,    _R+.04, _R+.04, 0.00],
-        [-_O*0.87, -_O*0.50, _R+.04, _R+.04, 2.09],
-        [ _O*0.87, -_O*0.50, _R+.04, _R+.04, 4.19],
-    ], dtype=np.float32),
+    MascotState.IDLE:    np.array([_ep(_POS[i], _R,       _ANGLES[i]) for i in range(3)], dtype=np.float32),
+    MascotState.AWARE:   np.array([_ep(_POS[i], _R+.01,   _ANGLES[i]) for i in range(3)], dtype=np.float32),
+    MascotState.LISTEN:  np.array([_ep(_POS[i], _R+.02,   _ANGLES[i]) for i in range(3)], dtype=np.float32),
+    MascotState.TOUCH:   np.array([_ep(_POS[i], _R+.02,   _ANGLES[i]) for i in range(3)], dtype=np.float32),
+    MascotState.EXCITED: np.array([_ep(_POS[i], _R+.04,   _ANGLES[i]) for i in range(3)], dtype=np.float32),
 }
 
 def _lerp(a, b, t):
