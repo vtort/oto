@@ -272,12 +272,12 @@ class Renderer:
 
         # Intensidad de pétalos por estado
         target_warp = {
-            MascotState.IDLE:    1.0,
+            MascotState.IDLE:    0.2,   # casi redondo
             MascotState.AWARE:   2.8,   # cara detectada → pétalos pronunciados
-            MascotState.LISTEN:  1.8,
-            MascotState.TOUCH:   0.4,   # redondo al tocar
-            MascotState.EXCITED: 2.2,
-        }.get(state, 1.0)
+            MascotState.LISTEN:  0.4,
+            MascotState.TOUCH:   0.1,   # redondo al tocar
+            MascotState.EXCITED: 0.6,
+        }.get(state, 0.2)
         self._warp = _lerp(self._warp, target_warp, 0.05)
 
         # ── Drag: delta desde donde empezó el toque, vuelve al soltar ─
