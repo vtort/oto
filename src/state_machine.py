@@ -3,20 +3,13 @@ from state import MascotState, StateBus
 
 
 STATE_COLORS = {
-    MascotState.IDLE:    "#6366f1",
-    MascotState.AWARE:   "#38bdf8",
-    MascotState.LISTEN:  "#4ade80",
-    MascotState.TOUCH:   "#fb923c",
-    MascotState.EXCITED: "#f43f5e",
+    MascotState.IDLE:   "#6366f1",
+    MascotState.LISTEN: "#4ade80",
+    MascotState.TOUCH:  "#fb923c",
 }
 
+DEMO_SEQUENCE = [MascotState.IDLE, MascotState.LISTEN]
 
-DEMO_SEQUENCE = [
-    MascotState.IDLE,
-    MascotState.LISTEN,
-    MascotState.EXCITED,
-    MascotState.AWARE,
-]
 
 class StateMachine:
     def __init__(self, bus: StateBus, cfg: dict, demo: bool = False):
@@ -25,7 +18,6 @@ class StateMachine:
         self.demo = demo
         self._state = MascotState.IDLE
         self._state_since = time.monotonic()
-        self._excited_until = 0.0
         self._demo_idx = 0
         self._demo_next = time.monotonic() + 4.0
 
@@ -38,33 +30,20 @@ class StateMachine:
             state = DEMO_SEQUENCE[self._demo_idx]
             self.bus.update(state=state, state_color=STATE_COLORS[state])
             return
+
         snap = self.bus.snapshot()
         now  = time.monotonic()
 
-        volume  = snap["volume"]
-        bass    = snap["bass"]
-        face    = snap["face_detected"]
-        touch   = snap["touch_active"]
-        idle_t  = self.cfg["states"]["idle_timeout_s"]
-        cool_t  = self.cfg["states"]["excited_cooldown_s"]
+        volume = snap["volume"]
+        bass   = snap["bass"]
+        touch  = snap["touch_active"]
         idle_th = self.cfg["audio"]["idle_threshold"]
+        listen_th = idle_th * 15.0  # solo voz real, no ruido ambiente
 
-        listen_th = idle_th * 15.0  # umbral alto — solo voz real, no ruido ambiente
-
-        # Priority order (highest first)
         if touch:
             new = MascotState.TOUCH
-        elif now < self._excited_until:
-            new = MascotState.EXCITED
-        elif bass > 0.85 or volume > 0.90:
-            new = MascotState.EXCITED
-            self._excited_until = now + cool_t
-        elif face and volume > listen_th:
-            new = MascotState.LISTEN   # cara + voz clara → LISTEN
-        elif face:
-            new = MascotState.AWARE    # cara detectada → AWARE (sin ruido de fondo)
-        elif volume > listen_th:
-            new = MascotState.LISTEN   # solo audio fuerte → LISTEN
+        elif bass > 0.85 or volume > listen_th:
+            new = MascotState.LISTEN
         else:
             new = MascotState.IDLE
 

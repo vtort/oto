@@ -120,21 +120,15 @@ def _pos(o): return [(0.000, o), (-o*0.87, -o*0.50), (o*0.87, -o*0.50)]
 def _state(o, r): return np.array([[*p, r, r, a] for p, a in zip(_pos(o), _ANGLES)], dtype=np.float32)
 
 _S = {
-    MascotState.IDLE:    _state(_O,       _R),
-    MascotState.AWARE:   _state(_O,       _R+.01),
-    MascotState.LISTEN:  _state(_O,       _R+.02),
-    MascotState.TOUCH:   _state(0.008,    _R+.02),
-    MascotState.EXCITED: _state(_O*1.3,   _R+.04),
+    MascotState.IDLE:   _state(_O,     _R),
+    MascotState.LISTEN: _state(_O,     _R+.02),
+    MascotState.TOUCH:  _state(0.008,  _R+.02),
 }
 
-# Armónicos (h2, h3, h4) por estado
-# AWARE: h4 grande → 4 pétalos redondeados tipo flor
 _H = {
-    MascotState.IDLE:    (0.07, 0.05, 0.03),
-    MascotState.AWARE:   (0.07, 0.05, 0.03),
-    MascotState.LISTEN:  (0.02, 0.03, 0.18),  # pétalos al escuchar
-    MascotState.TOUCH:   (0.03, 0.02, 0.01),
-    MascotState.EXCITED: (0.08, 0.06, 0.04),
+    MascotState.IDLE:   (0.07, 0.05, 0.03),
+    MascotState.LISTEN: (0.02, 0.03, 0.18),  # pétalos al escuchar
+    MascotState.TOUCH:  (0.03, 0.02, 0.01),
 }
 
 def _lerp(a, b, t):
@@ -207,11 +201,9 @@ class Renderer:
         self.hud_surf.fill((0, 0, 0, 0))
 
         state_col = {
-            MascotState.IDLE:    (100, 100, 180),
-            MascotState.AWARE:   (80,  180, 240),
-            MascotState.LISTEN:  (80,  220, 140),
-            MascotState.TOUCH:   (240, 160, 60),
-            MascotState.EXCITED: (240, 80,  80),
+            MascotState.IDLE:   (100, 100, 180),
+            MascotState.LISTEN: (80,  220, 140),
+            MascotState.TOUCH:  (240, 160, 60),
         }.get(state, (140, 140, 140))
 
         lines = [
@@ -303,11 +295,9 @@ class Renderer:
 
         # Rotation: base angle per ellipse + time drift, faster when excited
         rot_speed = {
-            MascotState.IDLE:    0.008,
-            MascotState.AWARE:   0.014,
-            MascotState.LISTEN:  0.022,
-            MascotState.TOUCH:   0.030,
-            MascotState.EXCITED: 0.055,
+            MascotState.IDLE:   0.008,
+            MascotState.LISTEN: 0.022,
+            MascotState.TOUCH:  0.030,
         }.get(state, 0.010)
         if state == MascotState.LISTEN:
             rot_speed += self._vol * 0.04 + self._mid * 0.03
