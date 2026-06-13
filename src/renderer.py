@@ -341,6 +341,12 @@ class Renderer:
                     pos = getattr(event, 'pos', None) or (
                         int(event.x * self.W), int(event.y * self.H))
                     self.bus.update(touch_active=True, touch_pos=pos)
+                elif event.type in (pygame.MOUSEMOTION, pygame.FINGERMOTION):
+                    if snap := self.bus.snapshot():
+                        if snap.get("touch_active"):
+                            pos = getattr(event, 'pos', None) or (
+                                int(event.x * self.W), int(event.y * self.H))
+                            self.bus.update(touch_pos=pos)
                 elif event.type in (pygame.MOUSEBUTTONUP, pygame.FINGERUP):
                     self.bus.update(touch_active=False)
 
