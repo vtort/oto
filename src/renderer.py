@@ -268,13 +268,15 @@ class Renderer:
         # Target ellipse config
         target_ep = _S[state].copy()
 
-        # Estiramiento solo cuando hay audio: bass escala, y la dirección varía por elipse
-        bass_scale = 1.0 + self._bass * 0.18 + self._vol * 0.06
-        stretch_dirs = [(1.0, 1.15), (1.15, 1.0), (1.0, 1.10)]  # rx/ry stretch distinto
+        # Reacción al audio: crecimiento uniforme + centros se acercan al origen
+        # así el solapamiento central crece con el bass en lugar de triangularse
+        bass_scale = 1.0 + self._bass * 0.16 + self._vol * 0.05
+        center_pull = 1.0 - self._bass * 0.30 - self._vol * 0.10  # acerca centros
         for i in range(N_ELLIPSES):
-            sx, sy = stretch_dirs[i]
-            target_ep[i, 2] *= 1.0 + (bass_scale - 1.0) * sx
-            target_ep[i, 3] *= 1.0 + (bass_scale - 1.0) * sy
+            target_ep[i, 0] *= center_pull
+            target_ep[i, 1] *= center_pull
+            target_ep[i, 2] *= bass_scale
+            target_ep[i, 3] *= bass_scale
 
         # Lerp current → target
         lp = 0.06
