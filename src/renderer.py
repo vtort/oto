@@ -29,11 +29,8 @@ uniform vec2  u_res;
 uniform vec4  u_ep0; uniform float u_ea0; uniform vec3 u_ec0; uniform float u_eph0;
 uniform vec4  u_ep1; uniform float u_ea1; uniform vec3 u_ec1; uniform float u_eph1;
 uniform vec4  u_ep2; uniform float u_ea2; uniform vec3 u_ec2; uniform float u_eph2;
-uniform float u_warp;
+uniform float u_h2, u_h3, u_h4;
 
-// Blob orgánico: distorsión armónica en coordenadas polares.
-// sin(θ×3) → 3 esquinas suaves; sin(θ×5) añade textura secundaria.
-// El resultado rota con la elipse via `phase`.
 float blobMask(vec4 ep, float ea, vec2 p, float phase) {
     vec2 d = p - ep.xy;
     float c = cos(ea), s = sin(ea);
@@ -41,11 +38,10 @@ float blobMask(vec4 ep, float ea, vec2 p, float phase) {
     vec2 n = q / ep.zw;
     float theta = atan(n.y, n.x);
     float r = length(n);
-    // u_warp 0=círculo, 1=blob suave, 2+=pétalos pronunciados
     float warp = 1.0
-        + u_warp * 0.07 * sin(theta * 2.0 + phase)
-        + u_warp * 0.08 * sin(theta * 4.0 + phase * 0.9)
-        + u_warp * 0.04 * sin(theta * 6.0 + phase * 1.3);
+        + u_h2 * sin(theta * 2.0 + phase)
+        + u_h3 * sin(theta * 3.0 + phase * 1.2)
+        + u_h4 * sin(theta * 4.0 + phase * 0.7);
     return 1.0 - smoothstep(-0.022, 0.022, r / warp - 1.0);
 }
 
@@ -127,9 +123,18 @@ _S = {
     MascotState.IDLE:    _state(_O,       _R),
     MascotState.AWARE:   _state(_O,       _R+.01),
     MascotState.LISTEN:  _state(_O,       _R+.02),
-    # TOUCH: centros casi en el origen → prácticamente todo blanco
     MascotState.TOUCH:   _state(0.008,    _R+.02),
     MascotState.EXCITED: _state(_O*1.3,   _R+.04),
+}
+
+# Armónicos (h2, h3, h4) por estado
+# AWARE: h4 grande → 4 pétalos redondeados tipo flor
+_H = {
+    MascotState.IDLE:    (0.07, 0.05, 0.03),
+    MascotState.AWARE:   (0.02, 0.03, 0.18),
+    MascotState.LISTEN:  (0.07, 0.05, 0.03),
+    MascotState.TOUCH:   (0.03, 0.02, 0.01),
+    MascotState.EXCITED: (0.08, 0.06, 0.04),
 }
 
 def _lerp(a, b, t):
@@ -187,7 +192,7 @@ class Renderer:
         self._t        = 0.0
         self._ep       = _S[MascotState.IDLE].copy()
         self._n_ep     = N_ELLIPSES
-        self._warp        = 1.0
+        self._harmonics   = np.array(_H[MascotState.IDLE], dtype=np.float32)
         self._drag        = np.array([0.0, 0.0], dtype=np.float32)
         self._touch_start = None   # posición píxel donde empezó el toque
         self._drag_origin = np.array([0.0, 0.0], dtype=np.float32)  # drag al inicio
@@ -270,15 +275,10 @@ class Renderer:
         lp = 0.18 if state == MascotState.TOUCH else 0.06
         self._ep = self._ep + (target_ep - self._ep) * lp
 
-        # Intensidad de pétalos por estado
-        target_warp = {
-            MascotState.IDLE:    0.2,   # casi redondo
-            MascotState.AWARE:   2.8,   # cara detectada → pétalos pronunciados
-            MascotState.LISTEN:  0.4,
-            MascotState.TOUCH:   0.1,   # redondo al tocar
-            MascotState.EXCITED: 0.6,
-        }.get(state, 0.2)
-        self._warp = _lerp(self._warp, target_warp, 0.05)
+        # Lerp armónicos → transición suave de forma al cambiar estado
+        target_h = np.array(_H[state], dtype=np.float32)
+        self._harmonics += (target_h - self._harmonics) * 0.04
+
 
         # ── Drag: delta desde donde empezó el toque, vuelve al soltar ─
         touch_pos = snap.get("touch_pos", (self.W/2, self.H/2))
@@ -327,7 +327,9 @@ class Renderer:
             self.prog[f'u_ec{i}'].value = tuple(ELLIPSE_COLORS[i].tolist())
             self.prog[f'u_eph{i}'].value = float(angle + i * 2.094)
 
-        self.prog['u_warp'].value = float(self._warp)
+        self.prog['u_h2'].value = float(self._harmonics[0])
+        self.prog['u_h3'].value = float(self._harmonics[1])
+        self.prog['u_h4'].value = float(self._harmonics[2])
         self.vao.render(moderngl.TRIANGLE_STRIP)
 
         # ── HUD overlay ───────────────────────────────────────────────
