@@ -41,8 +41,8 @@ float blobMask(vec4 ep, float ea, vec2 p, float phase) {
     float theta = atan(n.y, n.x);
     float r = length(n);
     float warp = 1.0
-        + 0.11 * sin(theta * 3.0 + phase)
-        + 0.04 * sin(theta * 5.0 + phase * 1.5);
+        + 0.03 * sin(theta * 3.0 + phase)
+        + 0.01 * sin(theta * 5.0 + phase * 1.5);
     return 1.0 - smoothstep(-0.022, 0.022, r / warp - 1.0);
 }
 
