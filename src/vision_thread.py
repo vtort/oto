@@ -39,7 +39,7 @@ class VisionThread(threading.Thread):
         self.neighbors  = self.cfg.get("detect_neighbors", 4)
 
     def run(self):
-        cap = cv2.VideoCapture(self.device)
+        cap = cv2.VideoCapture(self.device, cv2.CAP_V4L2)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH,  self.width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         cap.set(cv2.CAP_PROP_FPS,          self.fps_target)
