@@ -1,5 +1,6 @@
 import math
 import pygame
+import cv2
 from state import MascotState, StateBus
 
 
@@ -173,6 +174,27 @@ class Renderer:
                 pygame.draw.line(self.screen, (*c, 160), (ax, ay), (tx, ty), 2)
                 pygame.draw.circle(self.screen, c, (tx, ty), 5)
                 pygame.draw.circle(self.screen, (10, 10, 14), (tx, ty), 3)
+
+        # ── Debug: camera preview (esquina inferior derecha) ──────
+        debug_frame = snap.get("debug_frame")
+        if debug_frame is not None:
+            try:
+                import numpy as np
+                h, w = debug_frame.shape[:2]
+                scale = 160 / w
+                dw, dh = 160, int(h * scale)
+                small = cv2.resize(debug_frame, (dw, dh))
+                small_rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+                surf = pygame.surfarray.make_surface(np.transpose(small_rgb, (1, 0, 2)))
+                dx = self.W - dw - 8
+                dy = self.H - dh - 8
+                pygame.draw.rect(self.screen, (30, 30, 30), (dx-2, dy-2, dw+4, dh+4))
+                self.screen.blit(surf, (dx, dy))
+                label = "CAM"
+                font = pygame.font.SysFont(None, 18)
+                self.screen.blit(font.render(label, True, (100, 100, 100)), (dx+2, dy+2))
+            except Exception:
+                pass
 
         pygame.display.flip()
 

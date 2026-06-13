@@ -76,16 +76,21 @@ class VisionThread(threading.Thread):
                 minSize      = (40, 40),
             )
 
+            # Dibuja rectángulos en el frame para el debug overlay
+            debug_frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+            for (x, y, w, h) in faces:
+                cv2.rectangle(debug_frame, (x, y), (x+w, y+h), (0, 255, 100), 2)
+
             if len(faces) > 0:
-                # La cara más grande = la más cercana
                 x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-                cx_norm = (x + w / 2) / self.width   # 0=izquierda, 1=derecha
+                cx_norm = (x + w / 2) / self.width
                 self.bus.update(
                     face_detected=True,
                     face_x_norm=float(cx_norm),
+                    debug_frame=debug_frame,
                 )
             else:
-                self.bus.update(face_detected=False)
+                self.bus.update(face_detected=False, debug_frame=debug_frame)
 
         cap.release()
         print("[vision] cámara cerrada")

@@ -31,6 +31,9 @@ class StateBus:
             "touch_active":   False,
             "touch_pos":      (0, 0),
 
+            # Vision debug
+            "debug_frame":    None,
+
             # State machine output
             "state":          MascotState.IDLE,
             "state_color":    "#6366f1",
