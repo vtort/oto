@@ -31,6 +31,8 @@ class StateMachine:
         cool_t  = self.cfg["states"]["excited_cooldown_s"]
         idle_th = self.cfg["audio"]["idle_threshold"]
 
+        listen_th = idle_th * 4.0  # umbral más alto para LISTEN — evita falsos positivos
+
         # Priority order (highest first)
         if touch:
             new = MascotState.TOUCH
@@ -39,12 +41,12 @@ class StateMachine:
         elif bass > 0.7 or volume > 0.8:
             new = MascotState.EXCITED
             self._excited_until = now + cool_t
-        elif face and volume > idle_th:
-            new = MascotState.LISTEN   # cara + audio → LISTEN con ojos abiertos
+        elif face and volume > listen_th:
+            new = MascotState.LISTEN   # cara + voz clara → LISTEN
         elif face:
-            new = MascotState.AWARE    # cara sin audio → AWARE
-        elif volume > idle_th:
-            new = MascotState.LISTEN   # solo audio → LISTEN
+            new = MascotState.AWARE    # cara detectada → AWARE (sin ruido de fondo)
+        elif volume > listen_th:
+            new = MascotState.LISTEN   # solo audio fuerte → LISTEN
         else:
             new = MascotState.IDLE
 
