@@ -127,7 +127,7 @@ _S = {
 
 _H = {
     MascotState.IDLE:   (0.07, 0.05, 0.03),
-    MascotState.LISTEN: (0.02, 0.03, 0.18),  # pétalos al escuchar
+    MascotState.LISTEN: (0.04, 0.12, 0.09),  # mix ×3 y ×4 → nunca forma fija
     MascotState.TOUCH:  (0.03, 0.02, 0.01),
 }
 
@@ -303,13 +303,16 @@ class Renderer:
             rot_speed += self._vol * 0.18 + self._mid * 0.10
         rot_speed += self._bass * 0.02
 
-        # Cada elipse gira a velocidad ligeramente distinta + wobble sinusoidal
-        # con frecuencias irracionales → nunca se sincronizan, siempre impredecible
-        _speed_mult = [1.00, 0.73, 1.31]   # ratios distintos por elipse
-        _wobble_freq = [0.17, 0.23, 0.19]  # Hz del wobble de cada una
-        _wobble_amp  = 0.04 if state == MascotState.LISTEN else 0.008
+        # 1/√2/√3 son algebraicamente independientes → nunca se alinean igual
+        _speed_mult = [1.00, 1.41, 1.73]
+        if state == MascotState.LISTEN:
+            _wobble_amp   = 0.12
+            _wobble_freqs = [0.11, 0.17, 0.13]
+        else:
+            _wobble_amp   = 0.012
+            _wobble_freqs = [0.07, 0.11, 0.09]
         for i in range(N_ELLIPSES):
-            wobble = _wobble_amp * math.sin(t * _wobble_freq[i] * 2 * math.pi + i * 1.3)
+            wobble = _wobble_amp * math.sin(t * _wobble_freqs[i] * 2 * math.pi + i * 2.1)
             self._rot_offs[i] += (rot_speed * _speed_mult[i] + wobble) / self.fps
 
         # ── GL render ─────────────────────────────────────────────────
