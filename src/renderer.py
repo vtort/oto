@@ -25,17 +25,9 @@ in  vec2  v_uv;
 out vec4  fragColor;
 
 uniform vec2  u_res;
-uniform float u_time;
-uniform float u_bass;
-uniform float u_mid;
-uniform float u_high;
-uniform float u_vol;
-uniform float u_fft[16];
-
 uniform vec4  u_ep[6];   // cx, cy, rx, ry  (aspect-corrected space)
 uniform float u_ea[6];   // rotation angle per ellipse
 uniform vec3  u_ec[6];   // rgb per ellipse
-
 uniform vec4  u_blob;    // cx, cy, rx, ry
 uniform float u_bn;      // superellipse power
 
@@ -329,13 +321,6 @@ class Renderer:
 
         # ── GL render ─────────────────────────────────────────────────
         self.ctx.clear(0.04, 0.04, 0.07, 1.0)
-
-        self.prog['u_time'].value  = t
-        self.prog['u_bass'].value  = self._bass
-        self.prog['u_mid'].value   = self._mid
-        self.prog['u_high'].value  = self._high
-        self.prog['u_vol'].value   = self._vol
-        self.prog['u_fft'].value   = tuple(self._bars)
 
         asp = self.W / self.H
         for i in range(6):
