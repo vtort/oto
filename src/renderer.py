@@ -302,7 +302,15 @@ class Renderer:
         if state == MascotState.LISTEN:
             rot_speed += self._vol * 0.18 + self._mid * 0.10
         rot_speed += self._bass * 0.02
-        self._rot_offs += rot_speed / self.fps
+
+        # Cada elipse gira a velocidad ligeramente distinta + wobble sinusoidal
+        # con frecuencias irracionales → nunca se sincronizan, siempre impredecible
+        _speed_mult = [1.00, 0.73, 1.31]   # ratios distintos por elipse
+        _wobble_freq = [0.17, 0.23, 0.19]  # Hz del wobble de cada una
+        _wobble_amp  = 0.04 if state == MascotState.LISTEN else 0.008
+        for i in range(N_ELLIPSES):
+            wobble = _wobble_amp * math.sin(t * _wobble_freq[i] * 2 * math.pi + i * 1.3)
+            self._rot_offs[i] += (rot_speed * _speed_mult[i] + wobble) / self.fps
 
         # ── GL render ─────────────────────────────────────────────────
         self.ctx.clear(0.04, 0.04, 0.07, 1.0)
