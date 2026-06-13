@@ -1,10 +1,12 @@
 import math
+import random
 import pygame
 import cv2
+import numpy as np
 from state import MascotState, StateBus
 
 
-def hex_to_rgb(h: str) -> tuple:
+def hex_to_rgb(h):
     h = h.lstrip("#")
     return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
 
@@ -15,6 +17,44 @@ def lerp(a, b, t):
 
 def lerp_color(c1, c2, t):
     return tuple(int(lerp(a, b, t)) for a, b in zip(c1, c2))
+
+
+def hsv_to_rgb(h, s, v):
+    h = h % 360
+    c = v * s
+    x = c * (1 - abs((h / 60) % 2 - 1))
+    m = v - c
+    if   h < 60:  r,g,b = c,x,0
+    elif h < 120: r,g,b = x,c,0
+    elif h < 180: r,g,b = 0,c,x
+    elif h < 240: r,g,b = 0,x,c
+    elif h < 300: r,g,b = x,0,c
+    else:          r,g,b = c,0,x
+    return (int((r+m)*255), int((g+m)*255), int((b+m)*255))
+
+
+class Particle:
+    def __init__(self, x, y, vx, vy, color, life):
+        self.x, self.y   = x, y
+        self.vx, self.vy = vx, vy
+        self.color        = color
+        self.life         = life
+        self.max_life     = life
+
+    def update(self):
+        self.x  += self.vx
+        self.y  += self.vy
+        self.vx *= 0.96
+        self.vy *= 0.96
+        self.life -= 1
+
+    @property
+    def alpha(self):
+        return self.life / self.max_life
+
+    @property
+    def alive(self):
+        return self.life > 0
 
 
 class Renderer:
@@ -30,195 +70,203 @@ class Renderer:
         self.screen = pygame.display.set_mode((self.W, self.H), flags)
         pygame.display.set_caption("OTO")
         pygame.mouse.set_visible(False)
-        self.clock = pygame.time.Clock()
-        self.surf  = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
+        self.clock  = pygame.time.Clock()
 
-        # Animated state
-        self._color  = hex_to_rgb(cfg["mascot"]["color_idle"])
-        self._breathe = 0.0
-        self._bars   = [0.0] * 16
-        self._blink_t = 0.0
-        self._t       = 0.0
-        self._antenna = [0.0, 0.0]   # phase per antenna
+        # Blob shape
+        self.N      = 128          # puntos del blob
+        self.radii  = [0.0] * self.N   # radio actual suavizado por punto
 
-    def _ease(self, current, target, speed=0.1):
-        return lerp(current, target, speed)
+        # Color
+        self._hue    = 260.0      # arranca en violeta
+        self._sat    = 0.8
+        self._val    = 0.85
 
-    def draw_frame(self, snap: dict):
-        t      = self._t
-        state  = snap["state"]
-        col_h  = snap["state_color"]
-        col    = hex_to_rgb(col_h)
-        volume = snap["volume"]
-        bass   = snap["bass"]
-        bars   = snap["fft_bars"]
+        # Partículas
+        self.particles = []
 
-        # Smooth color transition
-        self._color = lerp_color(self._color, col, 0.05)
-        c = self._color
-
-        # Breathing speed per state
-        bspeed = {
-            MascotState.IDLE:    0.8,
-            MascotState.AWARE:   1.2,
-            MascotState.LISTEN:  1.5 + volume,
-            MascotState.TOUCH:   2.0,
-            MascotState.EXCITED: 3.0 + bass * 2,
-        }.get(state, 1.0)
-        self._breathe = math.sin(t * bspeed) * 0.5 + 0.5
+        # Tiempo
+        self._t = 0.0
 
         # Smooth bars
-        self._bars = [lerp(self._bars[i], bars[i], 0.2) for i in range(16)]
+        self._bars    = [0.0] * 16
+        self._volume  = 0.0
+        self._bass    = 0.0
+        self._mid     = 0.0
+        self._high    = 0.0
 
-        bg = (8, 8, 10)
-        self.screen.fill(bg)
+        # Surface para alpha blending
+        self.glow_surf = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
 
-        cx, cy = self.W // 2, self.H // 2
-        mcfg   = self.cfg["mascot"]
-        base_r = mcfg["body_radius"]
+    def _blob_points(self, cx, cy, t, bars, bass, mid, high, volume):
+        pts = []
+        base_r = min(self.W, self.H) * 0.22
 
-        # Body radius pulses with bass in excited/listen states
-        pulse = 0.0
-        if state in (MascotState.LISTEN, MascotState.EXCITED):
-            pulse = self._bars[1] * 18 + bass * 12
-        body_r = int(base_r + self._breathe * 4 + pulse)
+        for i in range(self.N):
+            angle = (i / self.N) * math.pi * 2
+            bar_i = bars[int(i / self.N * len(bars))]
 
-        # ── Glow ──────────────────────────────────────────────
-        glow_surf = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
-        for ring in range(5, 0, -1):
-            alpha = int(18 * ring * (0.5 + bass * 0.5))
-            r_glow = body_r + ring * 14
-            pygame.draw.circle(glow_surf, (*c, alpha), (cx, cy), r_glow)
-        self.screen.blit(glow_surf, (0, 0))
+            # Capas de deformación: cada banda afecta a una frecuencia espacial distinta
+            d  = 0.0
+            d += bass  * 55  * math.sin(angle * 2  + t * 0.9)
+            d += bass  * 30  * math.sin(angle * 3  - t * 0.7 + 0.5)
+            d += mid   * 28  * math.sin(angle * 5  + t * 1.4)
+            d += mid   * 18  * math.sin(angle * 7  - t * 1.8 + 1.0)
+            d += high  * 14  * math.sin(angle * 11 + t * 2.8)
+            d += high  * 8   * math.sin(angle * 17 - t * 3.5)
+            d += bar_i * 22  * math.sin(angle * 4  + t * 1.1 + i * 0.1)
+            d += volume * 10 * math.sin(angle * 9  + t * 2.0)
 
-        # ── EQ bars ───────────────────────────────────────────
-        n_bars  = 16
-        bar_w   = 12
-        gap     = 6
-        total_w = n_bars * bar_w + (n_bars - 1) * gap
-        bx0     = (self.W - total_w) // 2
-        max_bh  = 60
-        bar_y   = self.H - 50
+            # Radio target
+            target_r = base_r + d
 
-        for i, v in enumerate(self._bars):
-            bh  = int(v * max_bh)
-            bx  = bx0 + i * (bar_w + gap)
-            # Background track
-            pygame.draw.rect(self.screen, (20, 20, 24), (bx, bar_y - max_bh, bar_w, max_bh), border_radius=3)
-            if bh > 0:
-                alpha_bar = int(80 + v * 140)
-                bar_col   = (*c, alpha_bar)
-                s = pygame.Surface((bar_w, bh), pygame.SRCALPHA)
-                s.fill(bar_col)
-                self.screen.blit(s, (bx, bar_y - bh))
-            # Top pip
-            pygame.draw.rect(self.screen, c, (bx, bar_y - bh - 2, bar_w, 2), border_radius=1)
+            # Smooth por punto
+            self.radii[i] = lerp(self.radii[i], target_r, 0.12)
+            r = max(10, self.radii[i])
 
-        # ── Body circle ───────────────────────────────────────
-        pygame.draw.circle(self.screen, (18, 18, 22), (cx, cy), body_r)
-        pygame.draw.circle(self.screen, c, (cx, cy), body_r, 2)
+            pts.append((cx + math.cos(angle) * r,
+                        cy + math.sin(angle) * r))
+        return pts
 
-        # ── Eyes ──────────────────────────────────────────────
-        self._blink_t += 1 / self.fps
-        blinking = math.sin(self._blink_t * 0.25) > 0.97
+    def _emit_particles(self, pts, color, density=0.15):
+        for pt in pts:
+            if random.random() < density:
+                speed = random.uniform(0.3, 2.5)
+                angle = random.uniform(0, math.pi * 2)
+                self.particles.append(Particle(
+                    pt[0], pt[1],
+                    math.cos(angle) * speed,
+                    math.sin(angle) * speed,
+                    color,
+                    random.randint(20, 50)
+                ))
 
-        face      = snap.get("face_detected", False)
-        face_x    = snap.get("face_x_norm", 0.5)   # 0=izq, 1=der
+    def draw_frame(self, snap):
+        t       = self._t
+        state   = snap["state"]
+        bars    = snap["fft_bars"]
+        volume  = snap["volume"]
+        bass    = snap["bass"]
+        mid     = snap["mid"]
+        high    = snap["high"]
+        face    = snap.get("face_detected", False)
 
-        # Pupil offset sigue la cara (±10px)
-        if face:
-            pupil_dx = int((face_x - 0.5) * 20)
-        else:
-            pupil_dx = 0
+        # Smooth audio
+        sp = 0.15
+        self._bars   = [lerp(self._bars[i],   bars[i], sp) for i in range(16)]
+        self._volume = lerp(self._volume, volume, sp)
+        self._bass   = lerp(self._bass,   bass,   sp)
+        self._mid    = lerp(self._mid,    mid,    sp)
+        self._high   = lerp(self._high,   high,   sp)
 
-        eye_spread = 28 if face else 24
-        ey = cy - 10
+        # ── Color según estado y audio ─────────────────────────────────
+        target_hue = {
+            MascotState.IDLE:    260,   # violeta
+            MascotState.AWARE:   200,   # cian
+            MascotState.LISTEN:  160,   # verde-cian
+            MascotState.TOUCH:   30,    # naranja
+            MascotState.EXCITED: 0,     # rojo/rosa
+        }.get(state, 260)
 
-        for side in (-1, 1):
-            ex = cx + side * eye_spread
+        # Audio empuja el hue: bass → rojo, high → azul
+        target_hue += self._bass * 40 - self._high * 30
+        self._hue    = lerp(self._hue, target_hue, 0.03)
+        self._sat    = lerp(self._sat,  0.6 + self._volume * 0.4, 0.05)
+        self._val    = lerp(self._val,  0.7 + self._volume * 0.3, 0.05)
 
-            if blinking and state != MascotState.EXCITED:
-                pygame.draw.line(self.screen, c, (ex - 9, ey), (ex + 9, ey), 3)
-            else:
-                eye_h = {
-                    MascotState.IDLE:    8,
-                    MascotState.AWARE:   14,
-                    MascotState.LISTEN:  11,
-                    MascotState.TOUCH:   10,
-                    MascotState.EXCITED: 15,
-                }.get(state, 10)
-                if face:
-                    eye_h = 15  # cara detectada → ojos bien abiertos siempre
+        col_main  = hsv_to_rgb(self._hue,        self._sat, self._val)
+        col_inner = hsv_to_rgb(self._hue + 30,   self._sat * 0.6, self._val * 0.5)
+        col_outer = hsv_to_rgb(self._hue - 20,   self._sat * 0.4, self._val * 0.3)
 
-                # Eye white
-                pygame.draw.ellipse(self.screen, c,
-                    (ex - 9, ey - eye_h, 18, eye_h * 2))
-                # Pupil — sigue la cara
-                pygame.draw.ellipse(self.screen, (10, 10, 14),
-                    (ex - 4 + pupil_dx, ey - eye_h // 2, 8, eye_h))
-                # Shine
-                pygame.draw.circle(self.screen, (255, 255, 255),
-                    (ex + 3 + pupil_dx, ey - eye_h // 3), 2)
+        # ── Fondo: trail oscuro con persistencia ──────────────────────
+        bg_surf = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
+        bg_surf.fill((6, 6, 8, 180))   # alpha trail — cuanto más bajo más trail
+        self.screen.blit(bg_surf, (0, 0))
 
-        # Indicador "TE VEO" cuando detecta cara
-        if face:
-            font_s = pygame.font.SysFont(None, 20)
-            label  = font_s.render("● TE VEO", True, (*c, 180))
-            self.screen.blit(label, (self.W // 2 - 30, cy + body_r + 10))
+        cx = self.W // 2
+        cy = self.H // 2 + 10
 
-        # ── Mouth ─────────────────────────────────────────────
-        my = cy + 18
-        if state == MascotState.EXCITED:
-            pts = [(cx + int(math.cos(a) * 18), my + int(math.sin(a) * 10))
-                   for a in [math.radians(x) for x in range(10, 171, 10)]]
-            if len(pts) > 1:
-                pygame.draw.lines(self.screen, c, False, pts, 3)
-        else:
-            curve = 4 if state in (MascotState.LISTEN, MascotState.AWARE) else 2
-            pts = [(cx + int(math.cos(a) * 16), my + int(math.sin(a) * curve + 2))
-                   for a in [math.radians(x) for x in range(10, 171, 15)]]
-            if len(pts) > 1:
-                pygame.draw.lines(self.screen, c, False, pts, 2)
+        # ── Blob principal ────────────────────────────────────────────
+        pts = self._blob_points(cx, cy, t, self._bars,
+                                self._bass, self._mid, self._high, self._volume)
 
-        # ── Antennae (LISTEN / EXCITED) ───────────────────────
-        if state in (MascotState.LISTEN, MascotState.EXCITED):
-            for i, side in enumerate((-1, 1)):
-                self._antenna[i] += 0.08 * (2 if state == MascotState.EXCITED else 1)
-                wave = math.sin(self._antenna[i] + side * 1.5) * (8 if state == MascotState.EXCITED else 5)
-                ax   = cx + side * (body_r - 20)
-                ay   = cy - body_r + 2
-                tx   = ax + side * 14 + int(wave)
-                ty   = ay - 28
-                pygame.draw.line(self.screen, (*c, 160), (ax, ay), (tx, ty), 2)
-                pygame.draw.circle(self.screen, c, (tx, ty), 5)
-                pygame.draw.circle(self.screen, (10, 10, 14), (tx, ty), 3)
+        # Glow exterior (3 capas)
+        self.glow_surf.fill((0, 0, 0, 0))
+        for layer in range(3, 0, -1):
+            alpha = int(18 + self._volume * 30) * layer // 3
+            offset = layer * 12
+            off_pts = []
+            for i, (px, py) in enumerate(pts):
+                angle = (i / self.N) * math.pi * 2
+                off_pts.append((px + math.cos(angle) * offset,
+                                py + math.sin(angle) * offset))
+            if len(off_pts) > 2:
+                pygame.draw.polygon(self.glow_surf,
+                    (*col_outer, alpha), off_pts)
+        self.screen.blit(self.glow_surf, (0, 0))
 
-        # ── HUD: estado actual (esquina superior izquierda) ───────
-        font_hud = pygame.font.SysFont(None, 28)
-        state_label = f"STATE: {state.name}"
-        face_label  = "FACE: YES ✓" if face else "FACE: NO"
-        vol_label   = f"VOL: {int(snap['volume']*100):3d}%"
-        hud_lines   = [state_label, face_label, vol_label]
-        for i, line in enumerate(hud_lines):
-            col_hud = c if i == 0 else (80, 80, 80)
-            self.screen.blit(font_hud.render(line, True, col_hud), (10, 10 + i * 24))
+        # Blob relleno
+        if len(pts) > 2:
+            pygame.draw.polygon(self.screen, col_inner, pts)
 
-        # ── Debug: camera preview (esquina inferior derecha) ──────
+        # Contorno brillante
+        pygame.draw.polygon(self.screen, col_main, pts, 2)
+
+        # ── Partículas ────────────────────────────────────────────────
+        if state == MascotState.EXCITED or self._bass > 0.5:
+            self._emit_particles(pts[::8], col_main, density=0.3)
+        elif self._volume > 0.1:
+            self._emit_particles(pts[::16], col_main, density=0.05)
+
+        self.particles = [p for p in self.particles if p.alive]
+        for p in self.particles:
+            p.update()
+            alpha = int(p.alpha * 180)
+            r     = max(1, int(p.alpha * 3))
+            s = pygame.Surface((r*2, r*2), pygame.SRCALPHA)
+            pygame.draw.circle(s, (*p.color, alpha), (r, r), r)
+            self.screen.blit(s, (int(p.x)-r, int(p.y)-r))
+
+        # ── Ondas interiores (alta frecuencia) ────────────────────────
+        if self._high > 0.15:
+            inner_r = min(self.W, self.H) * 0.08
+            for ring in range(3):
+                rr  = inner_r * (ring + 1) * (1 + self._high * 0.3)
+                pts_r = []
+                for i in range(48):
+                    a   = (i / 48) * math.pi * 2
+                    dr  = self._high * 8 * math.sin(a * 6 + t * 4 + ring)
+                    pts_r.append((cx + math.cos(a) * (rr + dr),
+                                  cy + math.sin(a) * (rr + dr)))
+                alpha_r = int(self._high * 80)
+                s = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
+                pygame.draw.polygon(s, (*col_main, alpha_r), pts_r, 1)
+                self.screen.blit(s, (0, 0))
+
+        # ── HUD minimal ───────────────────────────────────────────────
+        font = pygame.font.SysFont(None, 22)
+        hud = [
+            (f"{state.name}", col_main),
+            (f"FACE: {'YES' if face else 'NO'}", (80,80,80) if not face else (100,200,100)),
+            (f"VOL {int(self._volume*100):3d}%", (60,60,60)),
+        ]
+        for i, (txt, c) in enumerate(hud):
+            self.screen.blit(font.render(txt, True, c), (10, 10 + i*20))
+
+        # ── Camera preview ────────────────────────────────────────────
         debug_frame = snap.get("debug_frame")
         if debug_frame is not None:
             try:
-                import numpy as np
-                h, w = debug_frame.shape[:2]
-                dw, dh = 160, int(h * 160 / w)
-                small     = cv2.resize(debug_frame, (dw, dh))
+                h, w  = debug_frame.shape[:2]
+                dw, dh = 140, int(h * 140 / w)
+                small = cv2.resize(debug_frame, (dw, dh))
                 small_rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
-                surf = pygame.surfarray.make_surface(np.transpose(small_rgb, (1, 0, 2)))
-                dx = self.W - dw - 8
-                dy = self.H - dh - 8
-                pygame.draw.rect(self.screen, (30, 30, 30), (dx-2, dy-2, dw+4, dh+4))
+                surf = pygame.surfarray.make_surface(
+                    np.transpose(small_rgb, (1, 0, 2)))
+                dx = self.W - dw - 6
+                dy = self.H - dh - 6
+                pygame.draw.rect(self.screen, (25,25,25),
+                    (dx-2, dy-2, dw+4, dh+4))
                 self.screen.blit(surf, (dx, dy))
-                font_cam = pygame.font.SysFont(None, 18)
-                self.screen.blit(font_cam.render("CAM", True, (100, 100, 100)), (dx+4, dy+4))
             except Exception:
                 pass
 
@@ -227,10 +275,9 @@ class Renderer:
     def run(self):
         import time as _time
         running = True
-        start = _time.monotonic()
+        start   = _time.monotonic()
         while running:
             for event in pygame.event.get():
-                # Ignore QUIT events in the first 2 seconds (spurious on Pi)
                 if event.type == pygame.QUIT:
                     if _time.monotonic() - start > 2.0:
                         running = False
