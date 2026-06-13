@@ -118,59 +118,60 @@ ELLIPSE_COLORS = np.array([
 # Per state: 6 × (cx, cy, rx, ry, angle_base)
 # cx/cy in aspect-corrected space (aspect ≈ 1.667 for 800×480)
 _S = {
+    # cx/cy pequeños = pegadas al centro, rx≈ry = circulares
     MascotState.IDLE: np.array([
-        [ 0.00,  0.08, 0.40, 0.30,  0.00],
-        [-0.18, -0.06, 0.38, 0.26,  1.20],
-        [ 0.15,  0.06, 0.34, 0.32,  2.50],
-        [-0.10,  0.14, 0.32, 0.24,  3.80],
-        [ 0.12, -0.10, 0.30, 0.28,  5.10],
-        [-0.05,  0.00, 0.28, 0.22,  0.60],
+        [ 0.00,  0.05, 0.32, 0.30,  0.00],
+        [-0.08, -0.04, 0.30, 0.29,  1.05],
+        [ 0.07,  0.04, 0.31, 0.30,  2.10],
+        [-0.06,  0.07, 0.29, 0.28,  3.15],
+        [ 0.08, -0.06, 0.30, 0.29,  4.20],
+        [-0.04,  0.02, 0.28, 0.27,  5.25],
     ], dtype=np.float32),
 
     MascotState.AWARE: np.array([
-        [ 0.00,  0.04, 0.50, 0.36,  0.00],
-        [-0.25, -0.04, 0.46, 0.30,  1.00],
-        [ 0.22,  0.08, 0.42, 0.38,  2.20],
-        [-0.12,  0.18, 0.38, 0.26,  3.50],
-        [ 0.16, -0.14, 0.36, 0.32,  4.80],
-        [-0.06,  0.00, 0.32, 0.24,  0.30],
+        [ 0.00,  0.04, 0.36, 0.34,  0.00],
+        [-0.10, -0.04, 0.34, 0.33,  1.05],
+        [ 0.09,  0.05, 0.35, 0.34,  2.10],
+        [-0.07,  0.09, 0.33, 0.32,  3.15],
+        [ 0.10, -0.07, 0.34, 0.33,  4.20],
+        [-0.05,  0.02, 0.32, 0.31,  5.25],
     ], dtype=np.float32),
 
     MascotState.LISTEN: np.array([
-        [ 0.00,  0.00, 0.60, 0.22,  0.00],
-        [-0.30,  0.00, 0.55, 0.20,  0.80],
-        [ 0.26,  0.02, 0.52, 0.24,  2.00],
-        [-0.12,  0.04, 0.48, 0.18,  3.30],
-        [ 0.18, -0.04, 0.42, 0.22,  4.60],
-        [-0.06,  0.00, 0.36, 0.16,  0.20],
+        [ 0.00,  0.00, 0.38, 0.28,  0.00],
+        [-0.12,  0.00, 0.36, 0.27,  1.05],
+        [ 0.11,  0.02, 0.37, 0.27,  2.10],
+        [-0.08,  0.04, 0.35, 0.26,  3.15],
+        [ 0.09, -0.03, 0.36, 0.27,  4.20],
+        [-0.05,  0.01, 0.33, 0.25,  5.25],
     ], dtype=np.float32),
 
     MascotState.TOUCH: np.array([
-        [ 0.05,  0.10, 0.44, 0.38,  0.50],
-        [-0.35,  0.12, 0.20, 0.42,  1.80],
-        [ 0.32,  0.06, 0.20, 0.40,  3.00],
-        [-0.10,  0.20, 0.40, 0.24,  4.20],
-        [ 0.14, -0.18, 0.32, 0.30,  5.50],
-        [-0.04,  0.02, 0.26, 0.34,  0.80],
+        [ 0.02,  0.06, 0.34, 0.33,  0.50],
+        [-0.10,  0.06, 0.32, 0.32,  1.55],
+        [ 0.10,  0.04, 0.33, 0.33,  2.60],
+        [-0.07,  0.10, 0.31, 0.31,  3.65],
+        [ 0.09, -0.08, 0.32, 0.32,  4.70],
+        [-0.04,  0.02, 0.30, 0.30,  5.75],
     ], dtype=np.float32),
 
     MascotState.EXCITED: np.array([
-        [ 0.00,  0.00, 0.55, 0.42,  0.00],
-        [-0.35, -0.12, 0.50, 0.36,  1.50],
-        [ 0.32,  0.14, 0.46, 0.38,  2.80],
-        [-0.14,  0.22, 0.44, 0.30,  4.00],
-        [ 0.20, -0.20, 0.40, 0.34,  5.20],
-        [-0.08,  0.05, 0.36, 0.28,  0.60],
+        [ 0.00,  0.00, 0.38, 0.36,  0.00],
+        [-0.14, -0.06, 0.36, 0.35,  1.05],
+        [ 0.13,  0.07, 0.37, 0.36,  2.10],
+        [-0.09,  0.12, 0.35, 0.34,  3.15],
+        [ 0.11, -0.10, 0.36, 0.35,  4.20],
+        [-0.06,  0.03, 0.34, 0.33,  5.25],
     ], dtype=np.float32),
 }
 
 # (cx, cy, rx, ry, superellipse_n)
 _BLOB = {
-    MascotState.IDLE:    (0.0, 0.0, 0.22, 0.22, 2.5),
-    MascotState.AWARE:   (0.0, 0.0, 0.26, 0.26, 3.0),
-    MascotState.LISTEN:  (0.0, 0.0, 0.34, 0.17, 2.0),
-    MascotState.TOUCH:   (0.0, 0.0, 0.24, 0.30, 3.5),
-    MascotState.EXCITED: (0.0, 0.0, 0.30, 0.30, 2.0),
+    MascotState.IDLE:    (0.0, 0.0, 0.20, 0.20, 2.5),
+    MascotState.AWARE:   (0.0, 0.0, 0.22, 0.22, 3.0),
+    MascotState.LISTEN:  (0.0, 0.0, 0.26, 0.16, 2.0),
+    MascotState.TOUCH:   (0.0, 0.0, 0.21, 0.21, 3.5),
+    MascotState.EXCITED: (0.0, 0.0, 0.24, 0.24, 2.0),
 }
 
 
@@ -295,17 +296,16 @@ class Renderer:
         target_ep   = _S[state].copy()
         target_blob = list(_BLOB[state])
 
-        # Audio deformation: bass scales ellipses, high adds jitter
-        scale = 1.0 + self._bass * 0.25 + self._vol * 0.10
+        # Audio deformation: bass escala suavemente, high add wobble sutil
+        scale = 1.0 + self._bass * 0.12 + self._vol * 0.05
         for i in range(6):
             target_ep[i, 2] *= scale
             target_ep[i, 3] *= scale
-            # High frequencies add asymmetric wobble
-            target_ep[i, 2] += self._high * 0.04 * math.sin(t * 3.0 + i * 1.1)
-            target_ep[i, 3] += self._high * 0.04 * math.cos(t * 2.7 + i * 0.9)
+            target_ep[i, 2] += self._high * 0.02 * math.sin(t * 2.5 + i * 1.1)
+            target_ep[i, 3] += self._high * 0.02 * math.cos(t * 2.2 + i * 0.9)
 
         # Blob reacts to bass
-        blob_scale = 1.0 + self._bass * 0.15
+        blob_scale = 1.0 + self._bass * 0.08
         target_blob[2] *= blob_scale
         target_blob[3] *= blob_scale
 
@@ -316,13 +316,13 @@ class Renderer:
 
         # Rotation: base angle per ellipse + time drift, faster when excited
         rot_speed = {
-            MascotState.IDLE:    0.15,
-            MascotState.AWARE:   0.25,
-            MascotState.LISTEN:  0.40,
-            MascotState.TOUCH:   0.60,
-            MascotState.EXCITED: 1.20,
-        }.get(state, 0.2)
-        rot_speed += self._bass * 0.8
+            MascotState.IDLE:    0.06,
+            MascotState.AWARE:   0.10,
+            MascotState.LISTEN:  0.16,
+            MascotState.TOUCH:   0.22,
+            MascotState.EXCITED: 0.45,
+        }.get(state, 0.08)
+        rot_speed += self._bass * 0.25
         self._rot_offs += rot_speed / self.fps
 
         # ── GL render ─────────────────────────────────────────────────
