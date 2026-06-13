@@ -112,36 +112,39 @@ N_ELLIPSES = 3
 # Per state: 3 × (cx, cy, rx, ry, angle_base)
 # Cada elipse separada ~120° del centro, muy juntas para que se solapen mucho
 # Cada fila: (cx, cy, rx, ry, angle_base)
-# rx/ry distintos por elipse para formas orgánicas irregulares
+# Formas base compactas y casi redondas — el estiramiento solo viene del audio
+_R = 0.30   # radio base
+_O = 0.065  # offset centro desde origen
+
 _S = {
     MascotState.IDLE: np.array([
-        [ 0.000,  0.080, 0.30, 0.36,  0.20],   # rojo: más alto que ancho
-        [-0.075, -0.043, 0.36, 0.28,  2.30],   # verde: más ancho que alto
-        [ 0.075, -0.043, 0.28, 0.34,  4.00],   # azul: proporción intermedia
+        [ 0.000,  _O,    _R,    _R,    0.20],
+        [-_O*0.87, -_O*0.50, _R, _R,  2.30],
+        [ _O*0.87, -_O*0.50, _R, _R,  4.00],
     ], dtype=np.float32),
 
     MascotState.AWARE: np.array([
-        [ 0.000,  0.090, 0.32, 0.38,  0.20],
-        [-0.085, -0.049, 0.38, 0.30,  2.30],
-        [ 0.085, -0.049, 0.30, 0.36,  4.00],
+        [ 0.000,  _O,    _R+.01, _R+.01, 0.20],
+        [-_O*0.87, -_O*0.50, _R+.01, _R+.01, 2.30],
+        [ _O*0.87, -_O*0.50, _R+.01, _R+.01, 4.00],
     ], dtype=np.float32),
 
     MascotState.LISTEN: np.array([
-        [ 0.000,  0.070, 0.28, 0.40,  0.10],   # más vertical cuando escucha
-        [-0.090, -0.040, 0.40, 0.26,  2.40],
-        [ 0.090, -0.040, 0.26, 0.38,  3.90],
+        [ 0.000,  _O,    _R+.02, _R+.02, 0.20],
+        [-_O*0.87, -_O*0.50, _R+.02, _R+.02, 2.30],
+        [ _O*0.87, -_O*0.50, _R+.02, _R+.02, 4.00],
     ], dtype=np.float32),
 
     MascotState.TOUCH: np.array([
-        [ 0.000,  0.090, 0.34, 0.34,  0.70],   # más redondo al tocar
-        [-0.085, -0.049, 0.34, 0.34,  2.79],
-        [ 0.085, -0.049, 0.34, 0.34,  4.89],
+        [ 0.000,  _O,    _R+.02, _R+.02, 0.70],
+        [-_O*0.87, -_O*0.50, _R+.02, _R+.02, 2.79],
+        [ _O*0.87, -_O*0.50, _R+.02, _R+.02, 4.89],
     ], dtype=np.float32),
 
     MascotState.EXCITED: np.array([
-        [ 0.000,  0.100, 0.34, 0.42,  0.00],   # más grandes y estiradas
-        [-0.095, -0.055, 0.42, 0.32,  2.09],
-        [ 0.095, -0.055, 0.30, 0.40,  4.19],
+        [ 0.000,  _O,    _R+.04, _R+.04, 0.00],
+        [-_O*0.87, -_O*0.50, _R+.04, _R+.04, 2.09],
+        [ _O*0.87, -_O*0.50, _R+.04, _R+.04, 4.19],
     ], dtype=np.float32),
 }
 
@@ -265,23 +268,13 @@ class Renderer:
         # Target ellipse config
         target_ep = _S[state].copy()
 
-        # Respiración orgánica suave — amplitud pequeña, frecuencias bajas
-        _breathe = [
-            (0.18, 0.23, 0.0),
-            (0.21, 0.16, 1.3),
-            (0.14, 0.19, 2.7),
-        ]
-        breathe_amp = 0.010
+        # Estiramiento solo cuando hay audio: bass escala, y la dirección varía por elipse
+        bass_scale = 1.0 + self._bass * 0.18 + self._vol * 0.06
+        stretch_dirs = [(1.0, 1.15), (1.15, 1.0), (1.0, 1.10)]  # rx/ry stretch distinto
         for i in range(N_ELLIPSES):
-            fr, fy, ph = _breathe[i]
-            target_ep[i, 2] += breathe_amp * math.sin(t * fr + ph)
-            target_ep[i, 3] += breathe_amp * math.cos(t * fy + ph)
-
-        # Audio: influencia muy sutil
-        scale = 1.0 + self._bass * 0.05 + self._vol * 0.02
-        for i in range(N_ELLIPSES):
-            target_ep[i, 2] *= scale
-            target_ep[i, 3] *= scale
+            sx, sy = stretch_dirs[i]
+            target_ep[i, 2] *= 1.0 + (bass_scale - 1.0) * sx
+            target_ep[i, 3] *= 1.0 + (bass_scale - 1.0) * sy
 
         # Lerp current → target
         lp = 0.06
