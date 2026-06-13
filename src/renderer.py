@@ -303,8 +303,8 @@ class Renderer:
             rot_speed += self._vol * 0.18 + self._mid * 0.10
         rot_speed += self._bass * 0.02
 
-        # 1/√2/√3 son algebraicamente independientes → nunca se alinean igual
-        _speed_mult = [1.00, 1.41, 1.73]
+        # 2 elipses en sentido horario, 1 antihorario → sensación de movimiento opuesto
+        _speed_mult = [1.00, -1.41, 1.73]
         if state == MascotState.LISTEN:
             _wobble_amp   = 0.12
             _wobble_freqs = [0.11, 0.17, 0.13]
