@@ -286,12 +286,13 @@ class Renderer:
         asp = self.W / self.H
         for i in range(N_ELLIPSES):
             angle = self._ep[i, 4] + self._rot_offs[i]
-            # Forzar radio único (promedio rx/ry) → círculo perfecto en pantalla
+            # Radio sin multiplicar por asp — en p-space asp-compensado,
+            # pasar r igual en x e y da un círculo perfecto en píxeles reales
             r = (float(self._ep[i,2]) + float(self._ep[i,3])) * 0.5
             self.prog[f'u_ep{i}'].value = (
                 float(self._ep[i,0]) * asp,
                 float(self._ep[i,1]),
-                r * asp,
+                r,
                 r,
             )
             self.prog[f'u_ea{i}'].value = float(angle)
