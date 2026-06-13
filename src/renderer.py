@@ -30,9 +30,6 @@ uniform vec4  u_ep0; uniform float u_ea0; uniform vec3 u_ec0;
 uniform vec4  u_ep1; uniform float u_ea1; uniform vec3 u_ec1;
 uniform vec4  u_ep2; uniform float u_ea2; uniform vec3 u_ec2;
 
-uniform vec4  u_blob;
-uniform float u_bn;
-
 float sdEllipse(vec2 p, vec2 cen, vec2 r, float ang) {
     vec2 d = p - cen;
     float c = cos(ang), s = sin(ang);
@@ -40,10 +37,8 @@ float sdEllipse(vec2 p, vec2 cen, vec2 r, float ang) {
     return length(q / r) - 1.0;
 }
 
-vec3 screenBlend(vec3 acc, vec4 ep, float ea, vec3 ec, vec2 p) {
-    float d = sdEllipse(p, ep.xy, ep.zw, ea);
-    float m = 1.0 - smoothstep(-0.025, 0.025, d);
-    return 1.0 - (1.0 - acc) * (1.0 - ec * m);
+float ellipseMask(vec4 ep, float ea, vec2 p) {
+    return 1.0 - smoothstep(-0.02, 0.02, sdEllipse(p, ep.xy, ep.zw, ea));
 }
 
 void main() {
@@ -52,22 +47,22 @@ void main() {
 
     vec3 col = vec3(0.04, 0.04, 0.07);
 
+    float m0 = ellipseMask(u_ep0, u_ea0, p);
+    float m1 = ellipseMask(u_ep1, u_ea1, p);
+    float m2 = ellipseMask(u_ep2, u_ea2, p);
+
+    // Screen blend: blanco donde los 3 se solapan, colores mixtos donde 2 se solapan
     vec3 scr = vec3(0.0);
-    scr = screenBlend(scr, u_ep0, u_ea0, u_ec0, p);
-    scr = screenBlend(scr, u_ep1, u_ea1, u_ec1, p);
-    scr = screenBlend(scr, u_ep2, u_ea2, u_ec2, p);
+    scr = 1.0 - (1.0 - scr) * (1.0 - u_ec0 * m0);
+    scr = 1.0 - (1.0 - scr) * (1.0 - u_ec1 * m1);
+    scr = 1.0 - (1.0 - scr) * (1.0 - u_ec2 * m2);
 
-    float presence = (scr.r + scr.g + scr.b) * 0.333;
-    col = mix(col, scr, clamp(presence * 3.0, 0.0, 1.0));
+    float any_ellipse = max(m0, max(m1, m2));
+    col = mix(col, scr, any_ellipse);
 
-    // White central superellipse blob
-    vec2 bq = (p - u_blob.xy) / u_blob.zw;
-    float bf = pow(abs(bq.x), u_bn) + pow(abs(bq.y), u_bn) - 1.0;
-    float bm = 1.0 - smoothstep(-0.04, 0.04, bf);
-    col = mix(col, vec3(1.0), bm);
-
+    // Vignette suave
     vec2 vd = v_uv - 0.5;
-    col *= 1.0 - dot(vd, vd) * 1.4;
+    col *= 1.0 - dot(vd, vd) * 1.2;
 
     fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }
@@ -99,58 +94,51 @@ void main() {
 
 # ── State configurations ───────────────────────────────────────────────────────
 
-# 3 colores principales del Figma: azul, rojo-naranja, verde
+# RGB puro — screen blend de los 3 genera blanco en la intersección central
+# R+G → amarillo, R+B → magenta, G+B → cian, R+G+B → blanco
 ELLIPSE_COLORS = np.array([
-    [0.10, 0.40, 1.00],
-    [1.00, 0.22, 0.05],
-    [0.05, 0.88, 0.38],
+    [1.00, 0.00, 0.00],   # Rojo
+    [0.00, 1.00, 0.00],   # Verde
+    [0.00, 0.00, 1.00],   # Azul
 ], dtype=np.float32)
 
 N_ELLIPSES = 3
 
 # Per state: 3 × (cx, cy, rx, ry, angle_base)
 # Cada elipse separada ~120° del centro, muy juntas para que se solapen mucho
+# Cada fila: (cx, cy, rx, ry, angle_base)
+# Los 3 centros están a 120° entre sí, offset pequeño para máximo solapamiento central
 _S = {
     MascotState.IDLE: np.array([
-        [ 0.00,  0.10, 0.30, 0.30,  0.00],
-        [-0.09, -0.05, 0.30, 0.30,  2.09],
-        [ 0.09, -0.05, 0.30, 0.30,  4.19],
+        [ 0.000,  0.080, 0.32, 0.32,  0.00],
+        [-0.069, -0.040, 0.32, 0.32,  2.09],
+        [ 0.069, -0.040, 0.32, 0.32,  4.19],
     ], dtype=np.float32),
 
     MascotState.AWARE: np.array([
-        [ 0.00,  0.12, 0.33, 0.33,  0.00],
-        [-0.10, -0.06, 0.33, 0.33,  2.09],
-        [ 0.10, -0.06, 0.33, 0.33,  4.19],
+        [ 0.000,  0.090, 0.34, 0.34,  0.00],
+        [-0.078, -0.045, 0.34, 0.34,  2.09],
+        [ 0.078, -0.045, 0.34, 0.34,  4.19],
     ], dtype=np.float32),
 
     MascotState.LISTEN: np.array([
-        [ 0.00,  0.07, 0.36, 0.26,  0.00],
-        [-0.13, -0.04, 0.34, 0.25,  2.09],
-        [ 0.13, -0.04, 0.34, 0.25,  4.19],
+        [ 0.000,  0.070, 0.36, 0.28,  0.00],
+        [-0.085, -0.040, 0.34, 0.27,  2.09],
+        [ 0.085, -0.040, 0.34, 0.27,  4.19],
     ], dtype=np.float32),
 
     MascotState.TOUCH: np.array([
-        [ 0.00,  0.12, 0.32, 0.32,  0.50],
-        [-0.10, -0.06, 0.32, 0.32,  2.59],
-        [ 0.10, -0.06, 0.32, 0.32,  4.69],
+        [ 0.000,  0.090, 0.35, 0.35,  0.50],
+        [-0.078, -0.045, 0.35, 0.35,  2.59],
+        [ 0.078, -0.045, 0.35, 0.35,  4.69],
     ], dtype=np.float32),
 
     MascotState.EXCITED: np.array([
-        [ 0.00,  0.14, 0.36, 0.36,  0.00],
-        [-0.12, -0.07, 0.36, 0.36,  2.09],
-        [ 0.12, -0.07, 0.36, 0.36,  4.19],
+        [ 0.000,  0.100, 0.38, 0.38,  0.00],
+        [-0.087, -0.050, 0.38, 0.38,  2.09],
+        [ 0.087, -0.050, 0.38, 0.38,  4.19],
     ], dtype=np.float32),
 }
-
-# (cx, cy, rx, ry, superellipse_n)
-_BLOB = {
-    MascotState.IDLE:    (0.0, 0.0, 0.20, 0.20, 2.5),
-    MascotState.AWARE:   (0.0, 0.0, 0.22, 0.22, 3.0),
-    MascotState.LISTEN:  (0.0, 0.0, 0.26, 0.16, 2.0),
-    MascotState.TOUCH:   (0.0, 0.0, 0.21, 0.21, 3.5),
-    MascotState.EXCITED: (0.0, 0.0, 0.24, 0.24, 2.0),
-}
-
 
 def _lerp(a, b, t):
     return a + (b - a) * t
@@ -207,7 +195,6 @@ class Renderer:
         self._t        = 0.0
         self._ep       = _S[MascotState.IDLE].copy()
         self._n_ep     = N_ELLIPSES
-        self._blob     = list(_BLOB[MascotState.IDLE])
         self._vol      = 0.0
         self._bass     = 0.0
         self._mid      = 0.0
@@ -271,8 +258,7 @@ class Renderer:
         self._bars = [_lerp(self._bars[i], bars[i], sp) for i in range(16)]
 
         # Target ellipse config
-        target_ep   = _S[state].copy()
-        target_blob = list(_BLOB[state])
+        target_ep = _S[state].copy()
 
         # Audio deformation: bass escala suavemente, high add wobble sutil
         scale = 1.0 + self._bass * 0.12 + self._vol * 0.05
@@ -282,15 +268,9 @@ class Renderer:
             target_ep[i, 2] += self._high * 0.02 * math.sin(t * 2.5 + i * 1.1)
             target_ep[i, 3] += self._high * 0.02 * math.cos(t * 2.2 + i * 0.9)
 
-        # Blob reacts to bass
-        blob_scale = 1.0 + self._bass * 0.08
-        target_blob[2] *= blob_scale
-        target_blob[3] *= blob_scale
-
         # Lerp current → target
         lp = 0.06
-        self._ep   = self._ep   + (target_ep - self._ep) * lp
-        self._blob = [_lerp(self._blob[i], target_blob[i], lp) for i in range(5)]
+        self._ep = self._ep + (target_ep - self._ep) * lp
 
         # Rotation: base angle per ellipse + time drift, faster when excited
         rot_speed = {
@@ -317,14 +297,6 @@ class Renderer:
             )
             self.prog[f'u_ea{i}'].value = float(angle)
             self.prog[f'u_ec{i}'].value = tuple(ELLIPSE_COLORS[i].tolist())
-
-        self.prog['u_blob'].value = (
-            float(self._blob[0]) * asp,
-            float(self._blob[1]),
-            float(self._blob[2]) * asp,
-            float(self._blob[3]),
-        )
-        self.prog['u_bn'].value = float(self._blob[4])
 
         self.vao.render(moderngl.TRIANGLE_STRIP)
 
