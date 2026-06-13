@@ -11,15 +11,33 @@ STATE_COLORS = {
 }
 
 
+DEMO_SEQUENCE = [
+    MascotState.IDLE,
+    MascotState.LISTEN,
+    MascotState.EXCITED,
+    MascotState.AWARE,
+]
+
 class StateMachine:
-    def __init__(self, bus: StateBus, cfg: dict):
+    def __init__(self, bus: StateBus, cfg: dict, demo: bool = False):
         self.bus = bus
         self.cfg = cfg
+        self.demo = demo
         self._state = MascotState.IDLE
         self._state_since = time.monotonic()
         self._excited_until = 0.0
+        self._demo_idx = 0
+        self._demo_next = time.monotonic() + 4.0
 
     def tick(self):
+        if self.demo:
+            now = time.monotonic()
+            if now >= self._demo_next:
+                self._demo_idx = (self._demo_idx + 1) % len(DEMO_SEQUENCE)
+                self._demo_next = now + 4.0
+            state = DEMO_SEQUENCE[self._demo_idx]
+            self.bus.update(state=state, state_color=STATE_COLORS[state])
+            return
         snap = self.bus.snapshot()
         now  = time.monotonic()
 

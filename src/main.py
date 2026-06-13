@@ -34,9 +34,11 @@ def state_machine_loop(sm: StateMachine, stop: threading.Event):
 
 
 def main():
+    import sys
+    demo = "--demo" in sys.argv
     cfg  = load_config()
     bus  = StateBus()
-    sm   = StateMachine(bus, cfg)
+    sm   = StateMachine(bus, cfg, demo=demo)
     stop = threading.Event()
 
     audio = AudioThread(bus, cfg)
