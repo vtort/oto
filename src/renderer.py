@@ -122,8 +122,16 @@ class Renderer:
         self._blink_t += 1 / self.fps
         blinking = math.sin(self._blink_t * 0.25) > 0.97
 
-        face = snap.get("face_detected", False)
-        eye_spread = 28 if (state == MascotState.AWARE or face) else 24
+        face      = snap.get("face_detected", False)
+        face_x    = snap.get("face_x_norm", 0.5)   # 0=izq, 1=der
+
+        # Pupil offset sigue la cara (±10px)
+        if face:
+            pupil_dx = int((face_x - 0.5) * 20)
+        else:
+            pupil_dx = 0
+
+        eye_spread = 28 if face else 24
         ey = cy - 10
 
         for side in (-1, 1):
@@ -139,17 +147,24 @@ class Renderer:
                     MascotState.TOUCH:   10,
                     MascotState.EXCITED: 15,
                 }.get(state, 10)
-                if face and eye_h < 14:
-                    eye_h = 14  # cara detectada → ojos siempre bien abiertos
+                if face:
+                    eye_h = 15  # cara detectada → ojos bien abiertos siempre
 
                 # Eye white
                 pygame.draw.ellipse(self.screen, c,
                     (ex - 9, ey - eye_h, 18, eye_h * 2))
-                # Pupil
+                # Pupil — sigue la cara
                 pygame.draw.ellipse(self.screen, (10, 10, 14),
-                    (ex - 4, ey - eye_h // 2, 8, eye_h))
+                    (ex - 4 + pupil_dx, ey - eye_h // 2, 8, eye_h))
                 # Shine
-                pygame.draw.circle(self.screen, (255, 255, 255), (ex + 3, ey - eye_h // 3), 2)
+                pygame.draw.circle(self.screen, (255, 255, 255),
+                    (ex + 3 + pupil_dx, ey - eye_h // 3), 2)
+
+        # Indicador "TE VEO" cuando detecta cara
+        if face:
+            font_s = pygame.font.SysFont(None, 20)
+            label  = font_s.render("● TE VEO", True, (*c, 180))
+            self.screen.blit(label, (self.W // 2 - 30, cy + body_r + 10))
 
         # ── Mouth ─────────────────────────────────────────────
         my = cy + 18
