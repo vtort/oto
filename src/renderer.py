@@ -186,7 +186,9 @@ class Renderer:
         self._t        = 0.0
         self._ep       = _S[MascotState.IDLE].copy()
         self._n_ep     = N_ELLIPSES
-        self._drag     = np.array([0.0, 0.0], dtype=np.float32)  # offset arrastre
+        self._drag        = np.array([0.0, 0.0], dtype=np.float32)
+        self._touch_start = None   # posición píxel donde empezó el toque
+        self._drag_origin = np.array([0.0, 0.0], dtype=np.float32)  # drag al inicio
         self._vol      = 0.0
         self._bass     = 0.0
         self._mid      = 0.0
@@ -266,19 +268,22 @@ class Renderer:
         lp = 0.18 if state == MascotState.TOUCH else 0.06
         self._ep = self._ep + (target_ep - self._ep) * lp
 
-        # ── Drag: sigue el dedo, vuelve al centro al soltar ──────────
+        # ── Drag: delta desde donde empezó el toque, vuelve al soltar ─
         touch_pos = snap.get("touch_pos", (self.W/2, self.H/2))
         if state == MascotState.TOUCH:
-            # Convertir píxeles → coordenadas normalizadas (-1..1, y invertida)
-            tx = (touch_pos[0] / self.W - 0.5) * 2.0
-            ty = -((touch_pos[1] / self.H - 0.5) * 2.0)
-            # Limitar el arrastre para que no salga de pantalla
-            tx = max(-0.6, min(0.6, tx))
-            ty = max(-0.6, min(0.6, ty))
-            target_drag = np.array([tx, ty], dtype=np.float32)
-            self._drag += (target_drag - self._drag) * 0.25  # sigue rápido
+            if self._touch_start is None:
+                # Primer frame del toque — fijar origen
+                self._touch_start = touch_pos
+                self._drag_origin = self._drag.copy()
+            # Delta en píxeles desde el inicio del toque
+            dx = (touch_pos[0] - self._touch_start[0]) / self.W * 2.0
+            dy = -((touch_pos[1] - self._touch_start[1]) / self.H * 2.0)
+            target_drag = self._drag_origin + np.array([dx, dy], dtype=np.float32)
+            target_drag = np.clip(target_drag, -0.7, 0.7)
+            self._drag += (target_drag - self._drag) * 0.30
         else:
-            self._drag += (np.array([0.0, 0.0]) - self._drag) * 0.025  # vuelve lento
+            self._touch_start = None  # resetear para el próximo toque
+            self._drag += (np.zeros(2) - self._drag) * 0.025  # vuelve lento
 
         # Rotation: base angle per ellipse + time drift, faster when excited
         rot_speed = {
