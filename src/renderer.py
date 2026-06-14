@@ -202,7 +202,8 @@ class Renderer:
         self._high     = 0.0
         self._bars     = [0.0] * 16
         self._rot_offs = np.zeros(N_ELLIPSES, dtype=np.float32)
-        self.THINK_BTN = pygame.Rect(10, self.H - 50, 120, 40)
+        self.THINK_BTN    = pygame.Rect(10, self.H - 50, 120, 40)
+        self._touch_on_btn = False
 
     THINK_BTN: pygame.Rect  # set in __init__ after H is known
 
@@ -403,17 +404,21 @@ class Renderer:
                     pos = getattr(event, 'pos', None) or (
                         int(event.x * self.W), int(event.y * self.H))
                     if self.THINK_BTN.collidepoint(pos):
+                        self._touch_on_btn = True
                         cur = self.bus.get("state")
                         self.bus.update(state=(MascotState.IDLE if cur == MascotState.THINKING else MascotState.THINKING))
                     else:
+                        self._touch_on_btn = False
                         self.bus.update(touch_active=True, touch_pos=pos)
                 elif event.type in (pygame.MOUSEMOTION, pygame.FINGERMOTION):
-                    if snap := self.bus.snapshot():
-                        if snap.get("touch_active"):
-                            pos = getattr(event, 'pos', None) or (
-                                int(event.x * self.W), int(event.y * self.H))
-                            self.bus.update(touch_pos=pos)
+                    if not self._touch_on_btn:
+                        if snap := self.bus.snapshot():
+                            if snap.get("touch_active"):
+                                pos = getattr(event, 'pos', None) or (
+                                    int(event.x * self.W), int(event.y * self.H))
+                                self.bus.update(touch_pos=pos)
                 elif event.type in (pygame.MOUSEBUTTONUP, pygame.FINGERUP):
+                    self._touch_on_btn = False
                     self.bus.update(touch_active=False)
 
             self._t += 1.0 / self.fps
