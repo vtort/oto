@@ -185,11 +185,16 @@ class LLMThread(threading.Thread):
             return ""
 
     def _speak(self, text: str):
+        import platform
         try:
+            if platform.system() == "Darwin":
+                # macOS: usar voz española nativa
+                subprocess.run(["say", "-v", "Mónica", text], timeout=60)
+                return
+            # Linux: piper > espeak-ng
             for model_path in [
                 os.path.expanduser("~/.local/share/piper/es_ES-sharvard-medium.onnx"),
                 os.path.expanduser("~/.local/share/piper/es_ES-davefx-medium.onnx"),
-                os.path.expanduser("~/.local/share/piper/en_US-lessac-medium.onnx"),
             ]:
                 if os.path.exists(model_path):
                     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:

@@ -5,14 +5,17 @@ Phase 1: Core engine + real-time audio FFT reactivity
 """
 
 import os
+import sys
 import json
 import time
 import threading
+import platform
 
-# Pi5 display config — set before pygame import
-os.environ.setdefault("SDL_VIDEODRIVER", "x11")
-os.environ.setdefault("DISPLAY", ":0")
-os.environ.setdefault("XAUTHORITY", "/home/pivic/.Xauthority")
+# Pi5-only display config
+if platform.system() == "Linux":
+    os.environ.setdefault("SDL_VIDEODRIVER", "x11")
+    os.environ.setdefault("DISPLAY", ":0")
+    os.environ.setdefault("XAUTHORITY", "/home/pivic/.Xauthority")
 
 from state import StateBus
 from state_machine import StateMachine
@@ -22,9 +25,10 @@ from llm_thread import LLMThread
 from renderer import Renderer
 
 
-def load_config(path="config/config.json") -> dict:
+def load_config() -> dict:
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    with open(os.path.join(base, path)) as f:
+    name = "config.mac.json" if platform.system() == "Darwin" else "config.json"
+    with open(os.path.join(base, "config", name)) as f:
         return json.load(f)
 
 
@@ -35,7 +39,6 @@ def state_machine_loop(sm: StateMachine, stop: threading.Event):
 
 
 def main():
-    import sys
     demo = "--demo" in sys.argv
     cfg  = load_config()
     bus  = StateBus()
