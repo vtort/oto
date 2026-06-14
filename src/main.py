@@ -53,7 +53,7 @@ def main():
     sm_thread.start()
     print("[oto] state machine started")
 
-    renderer = Renderer(bus, cfg)
+    renderer = Renderer(bus, cfg, demo=demo)
     print("[oto] renderer starting — press ESC to quit")
     try:
         renderer.run()

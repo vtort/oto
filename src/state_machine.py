@@ -9,7 +9,8 @@ STATE_COLORS = {
     MascotState.TOUCH:  "#fb923c",
 }
 
-DEMO_SEQUENCE = [MascotState.IDLE, MascotState.AWARE, MascotState.LISTEN]
+DEMO_SEQUENCE = [MascotState.IDLE, MascotState.AWARE, MascotState.LISTEN, MascotState.TOUCH, MascotState.THINKING]
+DEMO_DURATION = 6.0  # seconds per state
 
 
 class StateMachine:
@@ -20,16 +21,16 @@ class StateMachine:
         self._state = MascotState.IDLE
         self._state_since = time.monotonic()
         self._demo_idx = 0
-        self._demo_next = time.monotonic() + 4.0
+        self._demo_next = time.monotonic() + DEMO_DURATION
 
     def tick(self):
         if self.demo:
             now = time.monotonic()
             if now >= self._demo_next:
                 self._demo_idx = (self._demo_idx + 1) % len(DEMO_SEQUENCE)
-                self._demo_next = now + 4.0
+                self._demo_next = now + DEMO_DURATION
             state = DEMO_SEQUENCE[self._demo_idx]
-            self.bus.update(state=state, state_color=STATE_COLORS[state])
+            self.bus.update(state=state, state_color=STATE_COLORS.get(state, "#c084fc"))
             return
 
         snap = self.bus.snapshot()
@@ -42,15 +43,6 @@ class StateMachine:
         listen_th = idle_th * 35.0  # umbral alto — solo voz clara
 
         face = snap["face_detected"]
-
-        # Allow THINKING to be set externally (button); don't override it
-        if snap["state"] == MascotState.THINKING and self._state != MascotState.THINKING:
-            self._state = MascotState.THINKING
-            self._state_since = now
-
-        if self._state == MascotState.THINKING:
-            self.bus.update(state=self._state, state_color="#c084fc")
-            return
 
         if touch:
             new = MascotState.TOUCH
