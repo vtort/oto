@@ -70,7 +70,9 @@ class LLMThread(threading.Thread):
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
     def run(self):
-        self._load_whisper()
+        self._whisper_ready = threading.Event()
+        loader = threading.Thread(target=self._load_whisper, daemon=True)
+        loader.start()
         self._loop()
 
     def stop(self):
@@ -84,11 +86,19 @@ class LLMThread(threading.Thread):
             print("[llm] Whisper ready — say 'oye OTO' to activate")
         except Exception as e:
             print(f"[llm] ERROR loading Whisper: {e}")
+        finally:
+            self._whisper_ready.set()
 
     # ── Main loop (polls StateBus for raw audio) ───────────────────────────────
 
     def _loop(self):
-        chunk_s = 1024 / self._rate   # approximate seconds per chunk
+        # Wait for Whisper to finish loading before processing audio
+        self._whisper_ready.wait()
+        if not self._whisper:
+            print("[llm] Whisper failed to load, LLM disabled")
+            return
+
+        chunk_s = 1024 / self._rate
 
         while not self._stop.is_set():
             # Don't activate while LLM is already working
