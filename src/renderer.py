@@ -185,6 +185,7 @@ class Renderer:
         self.hud_surf = pygame.Surface((self.W, self.H), pygame.SRCALPHA)
         self.hud_font      = pygame.font.SysFont(None, 22)
         self.hud_font_big  = pygame.font.SysFont(None, 72)
+        self.hud_font_conv = pygame.font.SysFont(None, 28)  # cached — never create in draw loop
 
         # Static uniform
         self.prog['u_res'].value = (float(self.W), float(self.H))
@@ -261,7 +262,7 @@ class Renderer:
         max_w = self.W - pad * 2
         y     = self.H - pad
 
-        font_conv = pygame.font.SysFont(None, 28)
+        font_conv = self.hud_font_conv
 
         if response and state in (MascotState.ANSWER, MascotState.IDLE):
             lines = self._wrap_text(response, font_conv, max_w)

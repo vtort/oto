@@ -2,7 +2,7 @@
   "display": {
     "width": 800,
     "height": 480,
-    "fps": 60,
+    "fps": 30,
     "fullscreen": true
   },
   "audio": {
@@ -32,7 +32,7 @@
     "device_index": 0,
     "capture_width": 320,
     "capture_height": 240,
-    "fps": 10,
+    "fps": 5,
     "detect_scale": 1.2,
     "detect_neighbors": 4
   },

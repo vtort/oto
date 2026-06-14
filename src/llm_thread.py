@@ -55,8 +55,8 @@ class LLMThread(threading.Thread):
     def _load_whisper(self):
         try:
             from faster_whisper import WhisperModel
-            print("[llm] loading Whisper 'small'...")
-            self._whisper = WhisperModel("small", device="cpu", compute_type="int8")
+            print("[llm] loading Whisper 'tiny'...")
+            self._whisper = WhisperModel("tiny", device="cpu", compute_type="int8")
             print("[llm] Whisper ready — tap screen to talk")
         except Exception as e:
             print(f"[llm] ERROR loading Whisper: {e}")

@@ -66,6 +66,12 @@ class VisionThread(threading.Thread):
             if not ret:
                 continue
 
+            # Skip expensive detection when LLM is active — save CPU
+            from state import MascotState
+            current_state = self.bus.get("state")
+            if current_state in (MascotState.LISTEN, MascotState.THINKING, MascotState.ANSWER):
+                continue
+
             frame  = cv2.flip(frame, 1)  # corregir espejo horizontal
             gray   = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             gray   = cv2.equalizeHist(gray)   # mejora detección con poca luz
