@@ -457,7 +457,11 @@ class Renderer:
                     if event.key == pygame.K_ESCAPE:
                         running = False
                     elif event.key == pygame.K_SPACE:
-                        self.bus.update(recording=True)
+                        snap = self.bus.snapshot()
+                        if snap["state"] == MascotState.ANSWER:
+                            self.bus.update(stop_speaking=True)
+                        else:
+                            self.bus.update(recording=True)
                 elif event.type == pygame.KEYUP:
                     if event.key == pygame.K_SPACE:
                         self.bus.update(recording=False)

@@ -36,6 +36,7 @@ class StateBus:
             "touch_active":   False,
             "touch_pos":      (0, 0),
             "recording":      False,   # push-to-talk active
+            "stop_speaking":  False,   # interrupt ANSWER
 
             # LLM conversation display
             "heard_text":     "",      # last thing user said

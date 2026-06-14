@@ -155,23 +155,26 @@ class LLMThread(threading.Thread):
             self.bus.update(state=MascotState.IDLE, speaking_level=0.0)
             return
         print(f"[llm] response: {response!r}")
-        self.bus.update(state=MascotState.ANSWER, response_text=response)
+        self.bus.update(state=MascotState.ANSWER, response_text=response, stop_speaking=False)
         # TTS y animación en paralelo
+        self._tts_proc = None
         tts = threading.Thread(target=self._speak, args=(response,), daemon=True)
         tts.start()
         self._simulate_speaking(response)
-        tts.join()
-        self.bus.update(state=MascotState.IDLE, speaking_level=0.0)
+        if self._tts_proc and self._tts_proc.poll() is None:
+            self._tts_proc.kill()
+        tts.join(timeout=1)
+        self.bus.update(state=MascotState.IDLE, speaking_level=0.0, stop_speaking=False)
 
     def _simulate_speaking(self, text: str):
-        """Pulse speaking_level to drive ANSWER animation (replaces TTS audio)."""
-        duration = max(2.0, len(text) / 14.0)  # ~14 chars/sec speech rate
+        duration = max(2.0, len(text) / 14.0)
         start    = time.time()
         while time.time() - start < duration and not self._stop.is_set():
-            t    = time.time() - start
-            # Mimic speech: fast syllable bursts (~4Hz) with slower envelope
-            lvl  = (0.5 + 0.5 * math.sin(t * 4.0 * math.pi)) * \
-                   (0.6 + 0.4 * math.sin(t * 1.1 * math.pi))
+            if self.bus.get("stop_speaking", False):
+                break
+            t   = time.time() - start
+            lvl = (0.5 + 0.5 * math.sin(t * 4.0 * math.pi)) * \
+                  (0.6 + 0.4 * math.sin(t * 1.1 * math.pi))
             self.bus.update(speaking_level=float(lvl))
             time.sleep(0.033)
 
@@ -192,8 +195,8 @@ class LLMThread(threading.Thread):
         import platform
         try:
             if platform.system() == "Darwin":
-                # macOS: usar voz española nativa
-                subprocess.run(["say", "-v", "Mónica", text], timeout=60)
+                self._tts_proc = subprocess.Popen(["say", "-v", "Mónica", text])
+                self._tts_proc.wait()
                 return
             # Linux: piper > espeak-ng
             for model_path in [
