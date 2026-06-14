@@ -204,8 +204,9 @@ class Renderer:
         self._mid      = 0.0
         self._high     = 0.0
         self._bars     = [0.0] * 16
-        self._rot_offs = np.zeros(N_ELLIPSES, dtype=np.float32)
-        self._ea       = np.zeros(N_ELLIPSES, dtype=np.float32)  # rendered angle per ellipse, lerped
+        self._rot_offs  = np.zeros(N_ELLIPSES, dtype=np.float32)
+        self._ea        = np.zeros(N_ELLIPSES, dtype=np.float32)  # rendered angle, lerped
+        self._prev_state = MascotState.IDLE
         self._rot_speed = 0.008   # lerped rotation speed for smooth transitions
         self._squish_x  = 1.0    # lerped squish for THINKING
         self._squish_y  = 1.0
@@ -404,6 +405,11 @@ class Renderer:
         self.ctx.clear(0.04, 0.04, 0.07, 1.0)
         asp = self.W / self.H
 
+        # On exit from THINKING: sync rot_offs to _ea so angle continues smoothly
+        if self._prev_state == MascotState.THINKING and state != MascotState.THINKING:
+            for j in range(N_ELLIPSES):
+                self._rot_offs[j] = self._ea[j] - self._ep[j, 4]
+
         for i in range(N_ELLIPSES):
             angle = self._ep[i, 4] + self._rot_offs[i]
             if state == MascotState.THINKING:
@@ -425,6 +431,7 @@ class Renderer:
         self.prog['u_h3'].value = float(self._harmonics[1])
         self.prog['u_h4'].value = float(self._harmonics[2])
         self.vao.render(moderngl.TRIANGLE_STRIP)
+        self._prev_state = state
 
         # ── HUD overlay ────────────────────────────────────────────────
         self._update_hud(snap)
