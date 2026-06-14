@@ -343,12 +343,12 @@ class Renderer:
 
         asp = self.W / self.H
 
-        # THINKING: squish+pulse — aplasta verticalmente y pulsa en tamaño
+        # THINKING: aplastamiento horizontal sostenido + pulso lento
         if state == MascotState.THINKING:
-            pulse    = math.sin(t * 1.8)                  # 0.9 Hz
-            squish_x = 1.0 + pulse * 0.22                 # más ancho en el pico
-            squish_y = 1.0 - pulse * 0.22                 # más plano en el pico
-            size_pulse = 1.0 + abs(pulse) * 0.08          # pulso de tamaño suave
+            pulse    = math.sin(t * 1.2)                  # 0.6 Hz — más lento
+            squish_x = 1.55 + pulse * 0.30                # muy ancho (1.25–1.85)
+            squish_y = 0.45 - pulse * 0.12                # muy plano (0.33–0.57)
+            size_pulse = 1.0 + abs(pulse) * 0.06
         else:
             squish_x = squish_y = size_pulse = 1.0
 
