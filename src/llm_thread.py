@@ -161,9 +161,9 @@ class LLMThread(threading.Thread):
         tts = threading.Thread(target=self._speak, args=(response,), daemon=True)
         tts.start()
         self._simulate_speaking(response)
-        if self._tts_proc and self._tts_proc.poll() is None:
+        if self.bus.get("stop_speaking") and self._tts_proc and self._tts_proc.poll() is None:
             self._tts_proc.kill()
-        tts.join(timeout=1)
+        tts.join(timeout=2)
         self.bus.update(state=MascotState.IDLE, speaking_level=0.0, stop_speaking=False)
 
     def _simulate_speaking(self, text: str):
