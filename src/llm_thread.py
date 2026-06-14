@@ -6,6 +6,7 @@ Reads raw audio from StateBus (published by AudioThread).
 """
 import threading
 import time
+import math
 import os
 import tempfile
 import wave
@@ -148,15 +149,27 @@ class LLMThread(threading.Thread):
     # ── LLM + TTS ─────────────────────────────────────────────────────────────
 
     def _handle_question(self, question: str):
-        self.bus.update(state=MascotState.THINKING)
+        self.bus.update(state=MascotState.THINKING, heard_text=question, response_text="")
         response = self._ask_claude(question)
         if not response:
-            self.bus.update(state=MascotState.IDLE)
+            self.bus.update(state=MascotState.IDLE, speaking_level=0.0)
             return
         print(f"[llm] response: {response!r}")
-        self.bus.update(state=MascotState.ANSWER)
-        self._speak(response)
-        self.bus.update(state=MascotState.IDLE)
+        self.bus.update(state=MascotState.ANSWER, response_text=response)
+        self._simulate_speaking(response)
+        self.bus.update(state=MascotState.IDLE, speaking_level=0.0)
+
+    def _simulate_speaking(self, text: str):
+        """Pulse speaking_level to drive ANSWER animation (replaces TTS audio)."""
+        duration = max(2.0, len(text) / 14.0)  # ~14 chars/sec speech rate
+        start    = time.time()
+        while time.time() - start < duration and not self._stop.is_set():
+            t    = time.time() - start
+            # Mimic speech: fast syllable bursts (~4Hz) with slower envelope
+            lvl  = (0.5 + 0.5 * math.sin(t * 4.0 * math.pi)) * \
+                   (0.6 + 0.4 * math.sin(t * 1.1 * math.pi))
+            self.bus.update(speaking_level=float(lvl))
+            time.sleep(0.033)
 
     def _ask_claude(self, text: str) -> str:
         try:

@@ -37,6 +37,11 @@ class StateBus:
             "touch_pos":      (0, 0),
             "recording":      False,   # push-to-talk active
 
+            # LLM conversation display
+            "heard_text":     "",      # last thing user said
+            "response_text":  "",      # last OTO response
+            "speaking_level": 0.0,    # 0-1 simulated speech energy for ANSWER animation
+
             # Vision debug
             "debug_frame":    None,
 

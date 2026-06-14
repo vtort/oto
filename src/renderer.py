@@ -204,8 +204,34 @@ class Renderer:
         self._high     = 0.0
         self._bars     = [0.0] * 16
         self._rot_offs = np.zeros(N_ELLIPSES, dtype=np.float32)
+        self._rot_speed = 0.008   # lerped rotation speed for smooth transitions
+        self._squish_x  = 1.0    # lerped squish for THINKING
+        self._squish_y  = 1.0
+        self._speak_lvl = 0.0    # lerped speaking_level for ANSWER
 
-    def _update_hud(self, state, face, volume, debug_frame):
+    def _wrap_text(self, text, font, max_w):
+        """Split text into lines that fit within max_w pixels."""
+        words, lines, line = text.split(), [], []
+        for w in words:
+            test = " ".join(line + [w])
+            if font.size(test)[0] <= max_w:
+                line.append(w)
+            else:
+                if line:
+                    lines.append(" ".join(line))
+                line = [w]
+        if line:
+            lines.append(" ".join(line))
+        return lines
+
+    def _update_hud(self, snap):
+        state      = snap["state"]
+        face       = snap.get("face_detected", False)
+        volume     = self._vol
+        debug_frame = snap.get("debug_frame")
+        heard      = snap.get("heard_text", "")
+        response   = snap.get("response_text", "")
+
         self.hud_surf.fill((0, 0, 0, 0))
 
         state_col = {
@@ -217,30 +243,57 @@ class Renderer:
             MascotState.ANSWER:   (240, 200, 80),
         }.get(state, (140, 140, 140))
 
-        lines = [
-            (state.name,                             state_col),
-            (f"FACE: {'YES' if face else 'NO'}",     (80,200,80) if face else (60,60,60)),
-            (f"VOL  {int(volume*100):3d}%",          (60,60,60)),
-        ]
-        for i, (txt, col) in enumerate(lines):
+        # Corner HUD (small, top-left)
+        for i, (txt, col) in enumerate([
+            (state.name, state_col),
+            (f"VOL {int(volume*100):3d}%", (60, 60, 60)),
+        ]):
             surf = self.hud_font.render(txt, True, col)
             self.hud_surf.blit(surf, (10, 10 + i * 20))
 
         if self.demo:
-            big  = self.hud_font_big.render(state.name, True, (*state_col, 220))
-            bx   = (self.W - big.get_width()) // 2
+            big = self.hud_font_big.render(state.name, True, (*state_col, 220))
+            bx  = (self.W - big.get_width()) // 2
             self.hud_surf.blit(big, (bx, self.H - 90))
+
+        # Conversation text (bottom of screen)
+        pad   = 18
+        max_w = self.W - pad * 2
+        y     = self.H - pad
+
+        font_conv = pygame.font.SysFont(None, 28)
+
+        if response and state in (MascotState.ANSWER, MascotState.IDLE):
+            lines = self._wrap_text(response, font_conv, max_w)
+            for line in reversed(lines):
+                s = font_conv.render(line, True, (240, 200, 80))
+                y -= s.get_height() + 2
+                self.hud_surf.blit(s, (pad, y))
+            label = font_conv.render("OTO:", True, (180, 150, 60))
+            y -= label.get_height() + 4
+            self.hud_surf.blit(label, (pad, y))
+            y -= 8
+
+        if heard and state in (MascotState.LISTEN, MascotState.THINKING, MascotState.ANSWER, MascotState.IDLE):
+            lines = self._wrap_text(heard, font_conv, max_w)
+            for line in reversed(lines):
+                s = font_conv.render(line, True, (180, 230, 180))
+                y -= s.get_height() + 2
+                self.hud_surf.blit(s, (pad, y))
+            label = font_conv.render("TÚ:", True, (100, 160, 100))
+            y -= label.get_height() + 4
+            self.hud_surf.blit(label, (pad, y))
 
         if debug_frame is not None:
             try:
                 h, w   = debug_frame.shape[:2]
-                dw, dh = 140, int(h * 140 / w)
+                dw, dh = 120, int(h * 120 / w)
                 small  = cv2.resize(debug_frame, (dw, dh))
                 rgb    = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
                 cam_s  = pygame.surfarray.make_surface(np.transpose(rgb, (1,0,2)))
                 pygame.draw.rect(self.hud_surf, (20,20,20,200),
-                    (self.W-dw-8, self.H-dh-8, dw+4, dh+4))
-                self.hud_surf.blit(cam_s, (self.W-dw-6, self.H-dh-6))
+                    (self.W-dw-8, 8, dw+4, dh+4))
+                self.hud_surf.blit(cam_s, (self.W-dw-6, 10))
             except Exception:
                 pass
 
@@ -248,77 +301,71 @@ class Renderer:
         self.hud_tex.write(data)
 
     def draw_frame(self, snap):
-        t      = self._t
-        state  = snap["state"]
-        bars   = snap["fft_bars"]
-        vol    = snap["volume"]
-        bass   = snap["bass"]
-        mid    = snap["mid"]
-        high   = snap["high"]
-        face   = snap.get("face_detected", False)
-        dframe = snap.get("debug_frame")
+        t     = self._t
+        state = snap["state"]
+        bars  = snap["fft_bars"]
+        vol   = snap["volume"]
+        bass  = snap["bass"]
+        mid   = snap["mid"]
 
-        # Smooth audio
+        # ── Smooth audio ───────────────────────────────────────────────
         sp = 0.12
         self._vol  = _lerp(self._vol,  vol,  sp)
         self._bass = _lerp(self._bass, bass, sp)
         self._mid  = _lerp(self._mid,  mid,  sp)
-        self._high = _lerp(self._high, high, sp)
         self._bars = [_lerp(self._bars[i], bars[i], sp) for i in range(16)]
 
-        # Target ellipse config
-        target_ep = _S[state].copy()
+        # speaking_level from bus (set by LLMThread during ANSWER)
+        self._speak_lvl = _lerp(self._speak_lvl, snap.get("speaking_level", 0.0), 0.15)
 
-        # Reacción al audio: crecimiento uniforme + centros se acercan al origen
-        # así el solapamiento central crece con el bass en lugar de triangularse
-        bass_scale = 1.0 + self._bass * 0.16 + self._vol * 0.05
-        center_pull = 1.0 - self._bass * 0.30 - self._vol * 0.10  # acerca centros
+        # ── Audio level used for animation (mic or TTS depending on state) ─
+        anim_vol = self._speak_lvl if state == MascotState.ANSWER else self._vol
+        anim_mid = self._speak_lvl * 0.5 if state == MascotState.ANSWER else self._mid
+
+        # ── Target ellipse config ──────────────────────────────────────
+        target_ep = _S[state].copy()
+        bass_scale  = 1.0 + self._bass * 0.16 + anim_vol * 0.05
+        center_pull = 1.0 - self._bass * 0.30 - anim_vol * 0.10
         for i in range(N_ELLIPSES):
             target_ep[i, 0] *= center_pull
             target_ep[i, 1] *= center_pull
             target_ep[i, 2] *= bass_scale
             target_ep[i, 3] *= bass_scale
 
-        # Lerp más rápido en TOUCH para respuesta inmediata al usuario
-        lp = 0.18 if state == MascotState.TOUCH else 0.06
-        self._ep = self._ep + (target_ep - self._ep) * lp
+        lp = 0.18 if state == MascotState.TOUCH else 0.05
+        self._ep += (target_ep - self._ep) * lp
 
-        # Lerp armónicos → transición suave de forma al cambiar estado
+        # ── Harmonics — slow lerp for organic transitions ──────────────
         target_h = np.array(_H[state], dtype=np.float32)
-        # En LISTEN/ANSWER: los pétalos pulsan con audio (micro o TTS)
         if state in (MascotState.LISTEN, MascotState.ANSWER):
-            audio_pulse = self._vol * 0.20 + self._mid * 0.12
-            target_h[2] = _H[state][2] + audio_pulse
-        self._harmonics += (target_h - self._harmonics) * 0.08
+            target_h[2] = _H[state][2] + anim_vol * 0.20 + anim_mid * 0.12
+        self._harmonics += (target_h - self._harmonics) * 0.04  # 0.04 = slow morph
 
-
-        # ── Face tracking: deriva suavemente hacia la cara en AWARE ──
-        face_x = snap.get("face_x_norm", 0.5)  # ya corregido en vision_thread
+        # ── Face tracking ──────────────────────────────────────────────
+        face_x = snap.get("face_x_norm", 0.5)
         if state == MascotState.AWARE:
-            target_fx = (face_x - 0.5) * 0.30  # máx ±15% de pantalla
-            self._face_offset[0] += (target_fx - self._face_offset[0]) * 0.015  # muy suave
+            target_fx = (face_x - 0.5) * 0.30
+            self._face_offset[0] += (target_fx - self._face_offset[0]) * 0.015
         else:
             self._face_offset[0] += (0.0 - self._face_offset[0]) * 0.03
 
-        # ── Drag: delta desde donde empezó el toque, vuelve al soltar ─
+        # ── Drag (TOUCH) ───────────────────────────────────────────────
         touch_pos = snap.get("touch_pos", (self.W/2, self.H/2))
         if state == MascotState.TOUCH:
             if self._touch_start is None:
-                # Primer frame del toque — fijar origen
                 self._touch_start = touch_pos
                 self._drag_origin = self._drag.copy()
-            # Delta en píxeles desde el inicio del toque
             dx = (touch_pos[0] - self._touch_start[0]) / self.W * 2.0
             dy = -((touch_pos[1] - self._touch_start[1]) / self.H * 2.0)
-            target_drag = self._drag_origin + np.array([dx, dy], dtype=np.float32)
-            target_drag = np.clip(target_drag, -0.7, 0.7)
+            target_drag = np.clip(
+                self._drag_origin + np.array([dx, dy], dtype=np.float32), -0.7, 0.7)
             self._drag += (target_drag - self._drag) * 0.30
         else:
-            self._touch_start = None  # resetear para el próximo toque
-            self._drag += (np.zeros(2) - self._drag) * 0.025  # vuelve lento
+            self._touch_start = None
+            self._drag += (np.zeros(2) - self._drag) * 0.025
 
-        # Rotation: base angle per ellipse + time drift, faster when excited
-        rot_speed = {
+        # ── Rotation speed — lerped for smooth state transitions ───────
+        target_speed = {
             MascotState.IDLE:     0.008,
             MascotState.AWARE:    0.012,
             MascotState.LISTEN:   0.06,
@@ -326,46 +373,45 @@ class Renderer:
             MascotState.THINKING: 0.004,
             MascotState.ANSWER:   0.06,
         }.get(state, 0.010)
-        if state in (MascotState.LISTEN, MascotState.ANSWER):
-            rot_speed += self._vol * 0.18 + self._mid * 0.10
-        rot_speed += self._bass * 0.02
+        target_speed += anim_vol * 0.18 + anim_mid * 0.10 + self._bass * 0.02
+        self._rot_speed = _lerp(self._rot_speed, target_speed, 0.04)
 
-        # 2 elipses en sentido horario, 1 antihorario → sensación de movimiento opuesto
-        _speed_mult = [1.00, -1.41, 1.73]
-        if state in (MascotState.LISTEN, MascotState.ANSWER):
-            _wobble_amp   = 0.12
-            _wobble_freqs = [0.11, 0.17, 0.13]
-        else:
-            _wobble_amp   = 0.012
-            _wobble_freqs = [0.07, 0.11, 0.09]
+        # Wobble amplitude also lerps
+        target_wobble = 0.12 if state in (MascotState.LISTEN, MascotState.ANSWER) else 0.012
+        if not hasattr(self, '_wobble_amp'):
+            self._wobble_amp = target_wobble
+        self._wobble_amp = _lerp(self._wobble_amp, target_wobble, 0.04)
+
+        _speed_mult  = [1.00, -1.41, 1.73]
+        _wobble_freqs = [0.11, 0.17, 0.13]
         for i in range(N_ELLIPSES):
-            wobble = _wobble_amp * math.sin(t * _wobble_freqs[i] * 2 * math.pi + i * 2.1)
-            self._rot_offs[i] += (rot_speed * _speed_mult[i] + wobble) / self.fps
+            wobble = self._wobble_amp * math.sin(t * _wobble_freqs[i] * 2 * math.pi + i * 2.1)
+            self._rot_offs[i] += (self._rot_speed * _speed_mult[i] + wobble) / self.fps
 
-        # ── GL render ─────────────────────────────────────────────────
-        self.ctx.clear(0.04, 0.04, 0.07, 1.0)
-
-        asp = self.W / self.H
-
-        # THINKING: aplastamiento horizontal sostenido + pulso lento
+        # ── THINKING squish — lerped ───────────────────────────────────
         if state == MascotState.THINKING:
-            pulse    = math.sin(t * 1.2)                  # 0.6 Hz — más lento
-            squish_x = 1.55 + pulse * 0.30                # muy ancho (1.25–1.85)
-            squish_y = 0.45 - pulse * 0.12                # muy plano (0.33–0.57)
-            size_pulse = 1.0 + abs(pulse) * 0.06
+            pulse          = math.sin(t * 1.2)
+            target_squish_x = 1.55 + pulse * 0.30
+            target_squish_y = 0.45 - pulse * 0.12
         else:
-            squish_x = squish_y = size_pulse = 1.0
+            target_squish_x = target_squish_y = 1.0
+        self._squish_x = _lerp(self._squish_x, target_squish_x, 0.06)
+        self._squish_y = _lerp(self._squish_y, target_squish_y, 0.06)
+
+        # ── GL render ──────────────────────────────────────────────────
+        self.ctx.clear(0.04, 0.04, 0.07, 1.0)
+        asp = self.W / self.H
 
         for i in range(N_ELLIPSES):
             angle = self._ep[i, 4] + self._rot_offs[i]
-            # THINKING: forzar ángulo a 0 para que el squish sea horizontal en todos
+            # THINKING: ángulo forzado a 0 (lerped via squish approach)
             ea = 0.0 if state == MascotState.THINKING else float(angle)
-            r = (float(self._ep[i,2]) + float(self._ep[i,3])) * 0.5 * size_pulse
+            r  = (float(self._ep[i,2]) + float(self._ep[i,3])) * 0.5
             self.prog[f'u_ep{i}'].value = (
                 float(self._ep[i,0]) * asp + (self._drag[0] + self._face_offset[0]) * asp,
                 float(self._ep[i,1]) + self._drag[1],
-                r * squish_x,
-                r * squish_y,
+                r * self._squish_x,
+                r * self._squish_y,
             )
             self.prog[f'u_ea{i}'].value = ea
             self.prog[f'u_ec{i}'].value = tuple(ELLIPSE_COLORS[i].tolist())
@@ -376,8 +422,8 @@ class Renderer:
         self.prog['u_h4'].value = float(self._harmonics[2])
         self.vao.render(moderngl.TRIANGLE_STRIP)
 
-        # ── HUD overlay ───────────────────────────────────────────────
-        self._update_hud(state, face, self._vol, dframe)
+        # ── HUD overlay ────────────────────────────────────────────────
+        self._update_hud(snap)
         self.hud_tex.use(0)
         self.hud_prog['u_tex'].value = 0
         self.hud_vao.render(moderngl.TRIANGLE_STRIP)

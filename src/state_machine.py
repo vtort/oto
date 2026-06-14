@@ -15,17 +15,28 @@ STATE_COLORS = {
 LLM_STATES = {MascotState.THINKING, MascotState.ANSWER}
 
 DEMO_SEQUENCE = [MascotState.IDLE, MascotState.AWARE, MascotState.LISTEN, MascotState.TOUCH, MascotState.THINKING]
-DEMO_DURATION = 6.0  # seconds per state
+DEMO_DURATION = 6.0
+
+# How long a state must be "wanted" before we commit to it (debounce)
+# Prevents flickering between states on transient signals
+DEBOUNCE = {
+    MascotState.IDLE:   0.6,  # stay in active states a bit before going idle
+    MascotState.AWARE:  0.3,
+    MascotState.LISTEN: 0.0,  # immediate — voice is real-time
+    MascotState.TOUCH:  0.0,  # immediate — finger is down
+}
 
 
 class StateMachine:
     def __init__(self, bus: StateBus, cfg: dict, demo: bool = False):
-        self.bus = bus
-        self.cfg = cfg
+        self.bus  = bus
+        self.cfg  = cfg
         self.demo = demo
-        self._state = MascotState.IDLE
-        self._state_since = time.monotonic()
-        self._demo_idx = 0
+        self._state        = MascotState.IDLE
+        self._state_since  = time.monotonic()
+        self._pending      = MascotState.IDLE
+        self._pending_since = time.monotonic()
+        self._demo_idx  = 0
         self._demo_next = time.monotonic() + DEMO_DURATION
 
     def tick(self):
@@ -47,27 +58,32 @@ class StateMachine:
             self.bus.update(state_color=STATE_COLORS[self._state])
             return
 
-        volume = snap["volume"]
-        bass   = snap["bass"]
-        touch  = snap["touch_active"]
-        idle_th = self.cfg["audio"]["idle_threshold"]
-        listen_th = idle_th * 35.0  # umbral alto — solo voz clara
-
-        face = snap["face_detected"]
+        volume   = snap["volume"]
+        touch    = snap["touch_active"]
+        face     = snap["face_detected"]
+        idle_th  = self.cfg["audio"]["idle_threshold"]
+        listen_th = idle_th * 35.0
 
         if snap.get("recording"):
-            new = MascotState.LISTEN
+            wanted = MascotState.LISTEN
         elif touch:
-            new = MascotState.TOUCH
+            wanted = MascotState.TOUCH
         elif volume > listen_th:
-            new = MascotState.LISTEN
+            wanted = MascotState.LISTEN
         elif face:
-            new = MascotState.AWARE
+            wanted = MascotState.AWARE
         else:
-            new = MascotState.IDLE
+            wanted = MascotState.IDLE
 
-        if new != self._state:
-            self._state = new
+        # Track pending state change
+        if wanted != self._pending:
+            self._pending = wanted
+            self._pending_since = now
+
+        # Commit only after debounce period
+        debounce = DEBOUNCE.get(wanted, 0.3)
+        if wanted != self._state and (now - self._pending_since) >= debounce:
+            self._state       = wanted
             self._state_since = now
 
         self.bus.update(state=self._state, state_color=STATE_COLORS.get(self._state, "#6366f1"))
