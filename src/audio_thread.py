@@ -75,6 +75,8 @@ class AudioThread(threading.Thread):
                     mid=min(1.0, mid * 4),
                     high=min(1.0, high * 4),
                     fft_bars=bars,
+                    raw_audio=raw,
+                    raw_rms=rms,
                 )
 
             except Exception as e:

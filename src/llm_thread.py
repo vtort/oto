@@ -1,13 +1,11 @@
 """
 LLM thread: VAD+Whisper wake word → STT → Claude → TTS → ANSWER state
 
-Flow:
-  1. Always listen with VAD (chunk-level RMS)
-  2. When speech detected, record until silence → transcribe short clip
-  3. If transcription matches "oye oto" (fuzzy) → record full question
-  4. THINKING → Claude haiku → ANSWER → piper TTS → IDLE
+Reads raw audio from StateBus (published by AudioThread) — never opens
+the microphone directly, avoiding device contention.
 """
 import threading
+import queue
 import time
 import os
 import tempfile
@@ -15,28 +13,26 @@ import wave
 import subprocess
 import re
 import numpy as np
-import pyaudio
 import anthropic
 
 from state import MascotState, StateBus
 
-# ── Audio constants ────────────────────────────────────────────────────────────
-SAMPLE_RATE   = 16000
+# ── Audio constants (must match AudioThread) ──────────────────────────────────
+SAMPLE_RATE   = 44100          # AudioThread default
 CHANNELS      = 1
-CHUNK         = 1024          # ~64ms chunks for VAD
-FORMAT        = pyaudio.paInt16
+SAMPLE_WIDTH  = 2              # paInt16
 
-VAD_THRESHOLD = 600           # RMS to consider "voice present" — tune if needed
-SILENCE_LIMIT = 1.2           # seconds of silence to end recording
-MAX_RECORD_S  = 4             # max for wake word clip
-MAX_QUESTION_S = 15           # max for full question
+VAD_THRESHOLD = 0.015          # raw_rms threshold (AudioThread normalizes by /32768)
+SILENCE_LIMIT = 1.2            # seconds of silence to end recording
+MAX_WAKE_S    = 4              # max seconds to capture for wake word check
+MAX_QUESTION_S = 15            # max seconds for full question
 
-# ── Wake word variants (whisper sometimes adds punctuation or varies) ──────────
+# ── Wake word variants ────────────────────────────────────────────────────────
 WAKE_PATTERNS = [
     r"oye\s+oto",
     r"ey\s+oto",
     r"hey\s+oto",
-    r"oi\s+oto",       # Catalan variant
+    r"oi\s+oto",
     r"oye\s+otto",
     r"hey\s+otto",
 ]
@@ -62,20 +58,15 @@ class LLMThread(threading.Thread):
         self._client = anthropic.Anthropic(
             api_key=os.environ.get("ANTHROPIC_API_KEY", "")
         )
-        self._pa      = None
         self._whisper = None
+        # Detect actual sample rate from config
+        self._rate = cfg.get("audio", {}).get("sample_rate", SAMPLE_RATE)
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
     def run(self):
         self._load_whisper()
-        print("[llm] opening audio input...")
-        self._pa = pyaudio.PyAudio()
-        print("[llm] audio ready")
-        try:
-            self._loop()
-        finally:
-            self._pa.terminate()
+        self._loop()
 
     def stop(self):
         self._stop.set()
@@ -83,36 +74,30 @@ class LLMThread(threading.Thread):
     def _load_whisper(self):
         try:
             from faster_whisper import WhisperModel
-            print("[llm] loading Whisper 'small' model...")
+            print("[llm] loading Whisper 'tiny'...")
             self._whisper = WhisperModel("tiny", device="cpu", compute_type="int8")
             print("[llm] Whisper ready — say 'oye OTO' to activate")
         except Exception as e:
             print(f"[llm] ERROR loading Whisper: {e}")
 
-    # ── Main VAD loop ──────────────────────────────────────────────────────────
+    # ── Main loop (polls StateBus for raw audio) ───────────────────────────────
 
     def _loop(self):
-        stream = self._pa.open(
-            rate=SAMPLE_RATE, channels=CHANNELS,
-            format=FORMAT, input=True,
-            frames_per_buffer=CHUNK,
-        )
+        chunk_s = 1024 / self._rate   # approximate seconds per chunk
 
         while not self._stop.is_set():
             # Don't activate while LLM is already working
             if self.bus.get("state") in (MascotState.THINKING, MascotState.ANSWER):
                 time.sleep(0.1)
-                stream.read(CHUNK, exception_on_overflow=False)  # drain
                 continue
 
-            data = stream.read(CHUNK, exception_on_overflow=False)
-            rms  = _rms(data)
-
+            rms = self.bus.get("raw_rms", 0.0)
             if rms < VAD_THRESHOLD:
+                time.sleep(0.02)
                 continue
 
-            # Voice detected — record until silence (short clip for wake word)
-            frames = [data] + self._record_until_silence(stream, MAX_RECORD_S)
+            # Voice detected — collect frames until silence
+            frames, detected = self._collect_frames(MAX_WAKE_S)
             if not frames:
                 continue
 
@@ -125,60 +110,67 @@ class LLMThread(threading.Thread):
                 continue
 
             # ── Wake word confirmed ────────────────────────────────────────────
-            print("[llm] wake word! recording question...")
-            # Small pause so user can start speaking the question
-            time.sleep(0.3)
+            print("[llm] wake word! listening for question...")
+            time.sleep(0.4)  # brief pause before question
 
-            # Wait for voice to start, then record the question
-            q_frames = self._wait_and_record(stream, MAX_QUESTION_S)
+            q_frames, _ = self._collect_frames(MAX_QUESTION_S, wait_for_voice=True)
             if not q_frames:
                 continue
 
             question = self._transcribe(q_frames)
-            # Strip the wake word if it bled into the question clip
+            if not question:
+                continue
             question = re.sub(r"(?i)oye\s+oto[,.]?\s*", "", question).strip()
             if len(question) < 2:
                 continue
 
-            stream.stop_stream()
             self._handle_question(question)
-            stream.start_stream()
-            print("[llm] listening for 'oye OTO'...")
 
-        stream.stop_stream()
-        stream.close()
-
-    # ── Recording helpers ──────────────────────────────────────────────────────
-
-    def _record_until_silence(self, stream, max_s: float) -> list:
+    def _collect_frames(self, max_s: float, wait_for_voice: bool = False) -> tuple:
+        """Poll StateBus for raw audio until silence. Returns (frames, started)."""
         frames = []
-        silent = 0
-        silence_chunks = int(SILENCE_LIMIT * SAMPLE_RATE / CHUNK)
-        max_chunks     = int(max_s * SAMPLE_RATE / CHUNK)
+        silent_count = 0
+        started = not wait_for_voice
+        chunk_s = 1024 / self._rate
+        silence_chunks = int(SILENCE_LIMIT / chunk_s)
+        max_chunks = int(max_s / chunk_s)
+        wait_chunks = int(3.0 / chunk_s)
+        waited = 0
 
-        for _ in range(max_chunks):
+        last_raw = None
+
+        for _ in range(max_chunks + wait_chunks):
             if self._stop.is_set():
                 break
-            data = stream.read(CHUNK, exception_on_overflow=False)
-            frames.append(data)
-            if _rms(data) < VAD_THRESHOLD:
-                silent += 1
-                if silent >= silence_chunks:
+
+            raw = self.bus.get("raw_audio", b"")
+            rms = self.bus.get("raw_rms", 0.0)
+
+            # Skip duplicate chunks (bus hasn't updated yet)
+            if raw == last_raw:
+                time.sleep(0.01)
+                continue
+            last_raw = raw
+
+            if not started:
+                if rms >= VAD_THRESHOLD:
+                    started = True
+                else:
+                    waited += 1
+                    if waited >= wait_chunks:
+                        break
+                    continue
+
+            frames.append(raw)
+
+            if rms < VAD_THRESHOLD:
+                silent_count += 1
+                if silent_count >= silence_chunks:
                     break
             else:
-                silent = 0
-        return frames
+                silent_count = 0
 
-    def _wait_and_record(self, stream, max_s: float) -> list:
-        """Wait up to 3s for voice to start, then record until silence."""
-        wait_chunks = int(3.0 * SAMPLE_RATE / CHUNK)
-        for _ in range(wait_chunks):
-            if self._stop.is_set():
-                return []
-            data = stream.read(CHUNK, exception_on_overflow=False)
-            if _rms(data) >= VAD_THRESHOLD:
-                return [data] + self._record_until_silence(stream, max_s)
-        return []
+        return frames, started
 
     # ── STT ───────────────────────────────────────────────────────────────────
 
@@ -186,13 +178,26 @@ class LLMThread(threading.Thread):
         if not self._whisper or not frames:
             return ""
         try:
+            # Decode int16 PCM, resample 44100→16000 for Whisper
+            pcm = np.frombuffer(b"".join(frames), dtype=np.int16).astype(np.float32)
+            if self._rate != 16000:
+                ratio = 16000 / self._rate
+                n_out = int(len(pcm) * ratio)
+                pcm = np.interp(
+                    np.linspace(0, len(pcm) - 1, n_out),
+                    np.arange(len(pcm)),
+                    pcm,
+                )
+            pcm_int16 = pcm.astype(np.int16)
+
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 path = f.name
             with wave.open(path, "wb") as wf:
                 wf.setnchannels(CHANNELS)
-                wf.setsampwidth(self._pa.get_sample_size(FORMAT))
-                wf.setframerate(SAMPLE_RATE)
-                wf.writeframes(b"".join(frames))
+                wf.setsampwidth(SAMPLE_WIDTH)
+                wf.setframerate(16000)
+                wf.writeframes(pcm_int16.tobytes())
+
             segs, _ = self._whisper.transcribe(path, language="es", beam_size=2)
             text = " ".join(s.text for s in segs).strip()
             os.unlink(path)
@@ -201,17 +206,15 @@ class LLMThread(threading.Thread):
             print(f"[llm] transcribe error: {e}")
             return ""
 
-    # ── LLM + TTS pipeline ────────────────────────────────────────────────────
+    # ── LLM + TTS ─────────────────────────────────────────────────────────────
 
     def _handle_question(self, question: str):
         print(f"[llm] question: {question!r}")
-
         self.bus.update(state=MascotState.THINKING)
         response = self._ask_claude(question)
         if not response:
             self.bus.update(state=MascotState.IDLE)
             return
-
         print(f"[llm] response: {response!r}")
         self.bus.update(state=MascotState.ANSWER)
         self._speak(response)
@@ -232,7 +235,6 @@ class LLMThread(threading.Thread):
 
     def _speak(self, text: str):
         try:
-            # piper TTS — Spanish voice preferred
             for model_path in [
                 os.path.expanduser("~/.local/share/piper/es_ES-sharvard-medium.onnx"),
                 os.path.expanduser("~/.local/share/piper/es_ES-davefx-medium.onnx"),
@@ -248,13 +250,7 @@ class LLMThread(threading.Thread):
                     subprocess.run(["aplay", wav_path], capture_output=True, timeout=60)
                     os.unlink(wav_path)
                     return
-
-            # fallback: espeak-ng
+            # fallback
             subprocess.run(["espeak-ng", "-v", "es", "-s", "140", text], timeout=30)
         except Exception as e:
             print(f"[llm] TTS error: {e}")
-
-
-def _rms(data: bytes) -> float:
-    a = np.frombuffer(data, dtype=np.int16).astype(np.float32)
-    return float(np.sqrt(np.mean(a ** 2))) if len(a) else 0.0
