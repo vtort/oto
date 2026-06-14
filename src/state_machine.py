@@ -55,7 +55,9 @@ class StateMachine:
 
         face = snap["face_detected"]
 
-        if touch:
+        if snap.get("recording"):
+            new = MascotState.LISTEN
+        elif touch:
             new = MascotState.TOUCH
         elif volume > listen_th:
             new = MascotState.LISTEN

@@ -399,7 +399,7 @@ class Renderer:
                 elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
                     pos = getattr(event, 'pos', None) or (
                         int(event.x * self.W), int(event.y * self.H))
-                    self.bus.update(touch_active=True, touch_pos=pos)
+                    self.bus.update(touch_active=True, touch_pos=pos, recording=True)
                 elif event.type in (pygame.MOUSEMOTION, pygame.FINGERMOTION):
                     if snap := self.bus.snapshot():
                         if snap.get("touch_active"):
@@ -407,7 +407,7 @@ class Renderer:
                                 int(event.x * self.W), int(event.y * self.H))
                             self.bus.update(touch_pos=pos)
                 elif event.type in (pygame.MOUSEBUTTONUP, pygame.FINGERUP):
-                    self.bus.update(touch_active=False)
+                    self.bus.update(touch_active=False, recording=False)
 
             self._t += 1.0 / self.fps
             self.draw_frame(self.bus.snapshot())

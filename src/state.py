@@ -35,6 +35,7 @@ class StateBus:
             # Touch
             "touch_active":   False,
             "touch_pos":      (0, 0),
+            "recording":      False,   # push-to-talk active
 
             # Vision debug
             "debug_frame":    None,
