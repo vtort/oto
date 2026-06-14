@@ -407,11 +407,8 @@ class Renderer:
         for i in range(N_ELLIPSES):
             angle = self._ep[i, 4] + self._rot_offs[i]
             if state == MascotState.THINKING:
-                # Lerp rendered angle toward 0 — smooth squish entry
                 self._ea[i] = _lerp(self._ea[i], 0.0, 0.05)
             else:
-                # Sync rot_offs so rotation continues from current _ea on exit
-                self._rot_offs[i] = self._ea[i] - self._ep[i, 4]
                 self._ea[i] = angle
             r  = (float(self._ep[i,2]) + float(self._ep[i,3])) * 0.5
             self.prog[f'u_ep{i}'].value = (
