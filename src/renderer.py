@@ -281,13 +281,12 @@ class Renderer:
 
 
         # ── Face tracking: deriva suavemente hacia la cara en AWARE ──
-        face_x = snap.get("face_x_norm", 0.5)  # 0=izquierda, 1=derecha
+        face_x = 1.0 - snap.get("face_x_norm", 0.5)  # invertir — cámara en espejo
         if state == MascotState.AWARE:
-            # Mapear 0-1 a -0.25..+0.25 (desplazamiento suave, no extremo)
-            target_fx = (face_x - 0.5) * 0.50
-            self._face_offset[0] += (target_fx - self._face_offset[0]) * 0.03
+            target_fx = (face_x - 0.5) * 0.30  # máx ±15% de pantalla
+            self._face_offset[0] += (target_fx - self._face_offset[0]) * 0.015  # muy suave
         else:
-            self._face_offset[0] += (0.0 - self._face_offset[0]) * 0.05
+            self._face_offset[0] += (0.0 - self._face_offset[0]) * 0.03
 
         # ── Drag: delta desde donde empezó el toque, vuelve al soltar ─
         touch_pos = snap.get("touch_pos", (self.W/2, self.H/2))
