@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
-"""
-OTO 音 — Interactive Audio Mascot
-Phase 1: Core engine + real-time audio FFT reactivity
-"""
-
+"""OTO 音 — Interactive Audio Mascot"""
 import os
 import sys
 import json
 import time
+import queue
 import threading
 import platform
 
-# Pi5-only display config
 if platform.system() == "Linux":
     os.environ.setdefault("SDL_VIDEODRIVER", "x11")
     os.environ.setdefault("DISPLAY", ":0")
@@ -32,20 +28,15 @@ def load_config() -> dict:
         return json.load(f)
 
 
-def state_machine_loop(sm: StateMachine, stop: threading.Event):
-    while not stop.is_set():
-        sm.tick()
-        time.sleep(1 / 30)  # 30Hz is enough for state transitions
-
-
 def main():
     demo = "--demo" in sys.argv
     cfg  = load_config()
     bus  = StateBus()
-    sm   = StateMachine(bus, cfg, demo=demo)
     stop = threading.Event()
 
-    audio = AudioThread(bus, cfg)
+    speech_q = queue.Queue()
+
+    audio = AudioThread(bus, cfg, speech_q)
     audio.start()
     print("[oto] audio thread started")
 
@@ -53,17 +44,21 @@ def main():
     vision.start()
     print("[oto] vision thread started")
 
-    sm_thread = threading.Thread(target=state_machine_loop, args=(sm, stop), daemon=True, name="state")
+    sm = StateMachine(bus, cfg, demo=demo)
+    sm_thread = threading.Thread(
+        target=lambda: [sm.tick() or time.sleep(1/30) for _ in iter(lambda: stop.is_set(), True)],
+        daemon=True, name="state"
+    )
     sm_thread.start()
     print("[oto] state machine started")
 
-    llm = LLMThread(bus, cfg)
+    llm = LLMThread(bus, cfg, speech_q)
     if not demo:
         llm.start()
-        print("[oto] LLM thread started — tap screen to talk")
+        print("[oto] LLM thread started")
 
     renderer = Renderer(bus, cfg, demo=demo)
-    print("[oto] renderer starting — press ESC to quit")
+    print("[oto] renderer starting — SPACE to talk, ESC to quit")
     try:
         renderer.run()
     finally:

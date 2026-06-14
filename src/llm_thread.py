@@ -1,24 +1,25 @@
 """
-LLM thread: push-to-talk → STT → Claude → TTS → ANSWER state
+LLMThread — STT → Claude (streaming) → TTS per sentence
 
-Touch screen to record, release to transcribe and respond.
-Reads raw audio from StateBus (published by AudioThread).
+Pipeline:
+  speech_q (np.float32 16kHz) → mlx-whisper turbo (Metal)
+  → Claude streaming → sentence split → say per sentence
+  → speaking_level animation
 """
 import threading
+import queue
 import time
 import math
+import re
 import os
-import tempfile
-import wave
 import subprocess
 import numpy as np
 import anthropic
 
 from state import MascotState, StateBus
 
-SAMPLE_RATE  = 44100
-CHANNELS     = 1
-SAMPLE_WIDTH = 2   # paInt16
+HISTORY_TURNS = 6      # keep last N user+assistant pairs
+SENTENCE_RE   = re.compile(r'(?<=[.!?])\s+')
 
 SYSTEM_PROMPT = (
     "Eres OTO, una mascota interactiva inteligente y cercana. "
@@ -28,191 +29,197 @@ SYSTEM_PROMPT = (
 
 
 class LLMThread(threading.Thread):
-    def __init__(self, bus: StateBus, cfg: dict):
+    def __init__(self, bus: StateBus, cfg: dict, speech_q: queue.Queue):
         super().__init__(daemon=True, name="llm")
-        self.bus     = bus
-        self.cfg     = cfg
-        self._stop   = threading.Event()
-        self._client = anthropic.Anthropic(
+        self.bus      = bus
+        self.cfg      = cfg
+        self.speech_q = speech_q
+        self._stop    = threading.Event()
+        self._client  = anthropic.Anthropic(
             api_key=os.environ.get("ANTHROPIC_API_KEY", "")
         )
-        self._whisper       = None
-        self._whisper_ready = threading.Event()
-        self._rate = cfg.get("audio", {}).get("sample_rate", SAMPLE_RATE)
+        self._history  = []    # [{"role": ..., "content": ...}, ...]
+        self._tts_proc = None
+        self._whisper  = None
 
+    # kept for compat — no-op, loading is lazy on first use
     def preload_whisper(self):
-        """No-op kept for compatibility — loading is always async now."""
         pass
 
     def run(self):
-        loader = threading.Thread(target=self._load_whisper, daemon=True, name="whisper-load")
-        loader.start()
+        self._load_whisper()
         self._loop()
 
     def stop(self):
         self._stop.set()
+        if self._tts_proc and self._tts_proc.poll() is None:
+            self._tts_proc.kill()
+
+    # ── Whisper ───────────────────────────────────────────────────────
 
     def _load_whisper(self):
         try:
-            from faster_whisper import WhisperModel
-            print("[llm] loading Whisper 'tiny'...")
-            self._whisper = WhisperModel("tiny", device="cpu", compute_type="int8")
-            print("[llm] Whisper ready — tap screen to talk")
+            import mlx_whisper
+            self._whisper = mlx_whisper
+            # Warm up — downloads model on first call (~400MB, cached after)
+            print("[llm] loading mlx-whisper turbo (Metal)...")
+            mlx_whisper.transcribe(
+                np.zeros(RATE * 1, dtype=np.float32),
+                path_or_hf_repo="mlx-community/whisper-large-v3-turbo",
+                language="es",
+            )
+            print("[llm] Whisper ready — press SPACE to talk")
         except Exception as e:
-            print(f"[llm] ERROR loading Whisper: {e}")
-        finally:
-            self._whisper_ready.set()
+            print(f"[llm] mlx-whisper failed ({e}), falling back to faster-whisper")
+            self._load_faster_whisper()
 
-    # ── Main loop ─────────────────────────────────────────────────────────────
-
-    def _loop(self):
-        was_recording = False
-
-        while not self._stop.is_set():
-            recording = self.bus.get("recording", False)
-
-            if recording and not was_recording:
-                # Touch just started — collect frames until released
-                frames = self._collect_while_recording()
-                was_recording = False
-                self.bus.update(recording=False)  # safety
-
-                if not frames:
-                    continue
-
-                if not self._whisper_ready.wait(timeout=0.1):
-                    print("[llm] Whisper still loading, ignoring tap")
-                    continue
-                if not self._whisper:
-                    print("[llm] Whisper failed to load")
-                    continue
-
-                question = self._transcribe(frames)
-                if not question or len(question.strip()) < 2:
-                    print(f"[llm] nothing heard: {question!r}")
-                    continue
-
-                print(f"[llm] question: {question!r}")
-                self._handle_question(question)
-
-            was_recording = recording
-            time.sleep(0.02)
-
-    def _collect_while_recording(self) -> list:
-        """Collect raw audio frames from StateBus while recording=True."""
-        frames   = []
-        last_raw = None
-
-        while not self._stop.is_set():
-            if not self.bus.get("recording", False):
-                break
-            raw = self.bus.get("raw_audio", b"")
-            if raw and raw != last_raw:
-                frames.append(raw)
-                last_raw = raw
-            time.sleep(0.005)
-
-        return frames
-
-    # ── STT ───────────────────────────────────────────────────────────────────
-
-    def _transcribe(self, frames: list) -> str:
-        if not self._whisper or not frames:
-            return ""
+    def _load_faster_whisper(self):
         try:
-            pcm = np.frombuffer(b"".join(frames), dtype=np.int16).astype(np.float32)
-            if self._rate != 16000:
-                n_out = int(len(pcm) * 16000 / self._rate)
-                pcm   = np.interp(
-                    np.linspace(0, len(pcm) - 1, n_out),
-                    np.arange(len(pcm)),
-                    pcm,
+            from faster_whisper import WhisperModel
+            self._fw = WhisperModel("small", device="cpu", compute_type="int8")
+            self._whisper = None
+            print("[llm] faster-whisper ready")
+        except Exception as e:
+            print(f"[llm] STT unavailable: {e}")
+
+    def _transcribe(self, audio: np.ndarray) -> str:
+        try:
+            if self._whisper:
+                result = self._whisper.transcribe(
+                    audio,
+                    path_or_hf_repo="mlx-community/whisper-large-v3-turbo",
+                    language="es",
+                    word_timestamps=False,
                 )
-            pcm_int16 = pcm.astype(np.int16)
-
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-                path = f.name
-            with wave.open(path, "wb") as wf:
-                wf.setnchannels(CHANNELS)
-                wf.setsampwidth(SAMPLE_WIDTH)
-                wf.setframerate(16000)
-                wf.writeframes(pcm_int16.tobytes())
-
-            segs, _ = self._whisper.transcribe(path, language="es", beam_size=2)
-            text = " ".join(s.text for s in segs).strip()
-            os.unlink(path)
-            return text
+                return result["text"].strip()
+            elif hasattr(self, "_fw"):
+                import tempfile, wave
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                    path = f.name
+                with wave.open(path, "wb") as wf:
+                    wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(RATE)
+                    wf.writeframes((audio * 32768).astype(np.int16).tobytes())
+                segs, _ = self._fw.transcribe(path, language="es", beam_size=2)
+                os.unlink(path)
+                return " ".join(s.text for s in segs).strip()
         except Exception as e:
             print(f"[llm] transcribe error: {e}")
-            return ""
+        return ""
 
-    # ── LLM + TTS ─────────────────────────────────────────────────────────────
+    # ── Main loop ─────────────────────────────────────────────────────
 
-    def _handle_question(self, question: str):
-        self.bus.update(state=MascotState.THINKING, heard_text=question, response_text="")
-        response = self._ask_claude(question)
-        if not response:
-            self.bus.update(state=MascotState.IDLE, speaking_level=0.0)
-            return
-        print(f"[llm] response: {response!r}")
-        self.bus.update(state=MascotState.ANSWER, response_text=response, stop_speaking=False)
-        # TTS y animación en paralelo
-        self._tts_proc = None
-        tts = threading.Thread(target=self._speak, args=(response,), daemon=True)
-        tts.start()
-        self._simulate_speaking(response)
-        if self.bus.get("stop_speaking") and self._tts_proc and self._tts_proc.poll() is None:
-            self._tts_proc.kill()
-        tts.join(timeout=2)
+    def _loop(self):
+        while not self._stop.is_set():
+            try:
+                audio = self.speech_q.get(timeout=0.2)
+            except queue.Empty:
+                continue
+
+            # Don't start a new turn while already speaking
+            if self.bus.get("state") in (MascotState.THINKING, MascotState.ANSWER):
+                continue
+
+            self.bus.update(state=MascotState.THINKING, heard_text="", response_text="")
+
+            text = self._transcribe(audio)
+            if not text or len(text.strip()) < 2:
+                print(f"[llm] nothing heard: {text!r}")
+                self.bus.update(state=MascotState.IDLE)
+                continue
+
+            text = text.strip()
+            print(f"[llm] heard: {text!r}")
+            self.bus.update(heard_text=text)
+
+            self._answer(text)
+
+    # ── Claude streaming → sentence TTS ───────────────────────────────
+
+    def _answer(self, question: str):
+        self._history.append({"role": "user", "content": question})
+        if len(self._history) > HISTORY_TURNS * 2:
+            self._history = self._history[-HISTORY_TURNS * 2:]
+
+        self.bus.update(stop_speaking=False)
+
+        try:
+            sentence_buf = ""
+            full_response = ""
+
+            with self._client.messages.stream(
+                model="claude-haiku-4-5",
+                max_tokens=300,
+                system=SYSTEM_PROMPT,
+                messages=self._history,
+            ) as stream:
+                self.bus.update(state=MascotState.ANSWER)
+
+                for token in stream.text_stream:
+                    if self._stop.is_set() or self.bus.get("stop_speaking"):
+                        break
+
+                    sentence_buf  += token
+                    full_response += token
+
+                    # Speak as soon as we have a complete sentence
+                    if SENTENCE_RE.search(sentence_buf) or \
+                       (len(sentence_buf) > 120 and sentence_buf[-1] in ".,"):
+                        parts = SENTENCE_RE.split(sentence_buf, maxsplit=1)
+                        to_speak      = parts[0].strip()
+                        sentence_buf  = parts[1] if len(parts) > 1 else ""
+                        if to_speak:
+                            self._speak_sentence(to_speak)
+                            if self.bus.get("stop_speaking"):
+                                break
+
+                # Speak any remaining text
+                if sentence_buf.strip() and not self.bus.get("stop_speaking"):
+                    self._speak_sentence(sentence_buf.strip())
+
+        except Exception as e:
+            print(f"[llm] claude error: {e}")
+            full_response = ""
+
+        if full_response:
+            self._history.append({"role": "assistant", "content": full_response})
+            self.bus.update(response_text=full_response)
+            print(f"[llm] response: {full_response!r}")
+
         self.bus.update(state=MascotState.IDLE, speaking_level=0.0, stop_speaking=False)
 
-    def _simulate_speaking(self, text: str):
-        duration = max(2.0, len(text) / 14.0)
-        start    = time.time()
+    def _speak_sentence(self, text: str):
+        if self.bus.get("stop_speaking"):
+            return
+
+        # Animation pulse in parallel with TTS
+        anim = threading.Thread(target=self._pulse_animation, args=(text,), daemon=True)
+        anim.start()
+
+        try:
+            self._tts_proc = subprocess.Popen(["say", "-v", "Mónica", text])
+            self._tts_proc.wait()
+        except Exception as e:
+            print(f"[llm] TTS error: {e}")
+
+        anim.join(timeout=1)
+
+    def _pulse_animation(self, text: str):
+        duration = max(1.0, len(text) / 14.0)
+        start = time.time()
         while time.time() - start < duration and not self._stop.is_set():
-            if self.bus.get("stop_speaking", False):
+            if self.bus.get("stop_speaking"):
                 break
             t   = time.time() - start
             lvl = (0.5 + 0.5 * math.sin(t * 4.0 * math.pi)) * \
                   (0.6 + 0.4 * math.sin(t * 1.1 * math.pi))
             self.bus.update(speaking_level=float(lvl))
             time.sleep(0.033)
+        self.bus.update(speaking_level=0.0)
 
-    def _ask_claude(self, text: str) -> str:
-        try:
-            msg = self._client.messages.create(
-                model="claude-haiku-4-5",
-                max_tokens=256,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": text}],
-            )
-            return msg.content[0].text.strip()
-        except Exception as e:
-            print(f"[llm] claude error: {e}")
-            return ""
+    def stop(self):
+        self._stop.set()
+        if self._tts_proc and self._tts_proc.poll() is None:
+            self._tts_proc.kill()
 
-    def _speak(self, text: str):
-        import platform
-        try:
-            if platform.system() == "Darwin":
-                self._tts_proc = subprocess.Popen(["say", "-v", "Mónica", text])
-                self._tts_proc.wait()
-                return
-            # Linux: piper > espeak-ng
-            for model_path in [
-                os.path.expanduser("~/.local/share/piper/es_ES-sharvard-medium.onnx"),
-                os.path.expanduser("~/.local/share/piper/es_ES-davefx-medium.onnx"),
-            ]:
-                if os.path.exists(model_path):
-                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-                        wav_path = f.name
-                    subprocess.run(
-                        ["piper", "--model", model_path, "--output_file", wav_path],
-                        input=text.encode(), capture_output=True, timeout=30,
-                    )
-                    subprocess.run(["aplay", wav_path], capture_output=True, timeout=60)
-                    os.unlink(wav_path)
-                    return
-            subprocess.run(["espeak-ng", "-v", "es", "-s", "140", text], timeout=30)
-        except Exception as e:
-            print(f"[llm] TTS error: {e}")
+
+RATE = 16000

@@ -1,90 +1,115 @@
+"""
+AudioThread — sounddevice callbacks + Silero VAD
+
+16kHz mono stream:
+- Publishes volume/bass/mid/high/fft_bars to StateBus for animation
+- When recording=True (spacebar held): collects audio + Silero VAD detects
+  end-of-speech automatically → puts np.ndarray in speech_q for STT
+"""
 import threading
+import queue
 import numpy as np
 
-try:
-    import pyaudio
-    PYAUDIO_OK = True
-except ImportError:
-    PYAUDIO_OK = False
+import sounddevice as sd
+from silero_vad import load_silero_vad, VADIterator
 
 from state import StateBus
 
+RATE           = 16000
+CHUNK_MS       = 30
+CHUNK_SAMPLES  = int(RATE * CHUNK_MS / 1000)   # 480
+N_FFT_BANDS    = 16
+SILENCE_MS     = 600
+
+
+def _fft_bands(chunk: np.ndarray, n: int = N_FFT_BANDS):
+    win  = chunk * np.hanning(len(chunk))
+    spec = np.abs(np.fft.rfft(win)) / (len(chunk) / 2 + 1e-9)
+    return [float(np.mean(b)) for b in np.array_split(spec, n)]
+
 
 class AudioThread(threading.Thread):
-    def __init__(self, bus: StateBus, cfg: dict):
+    def __init__(self, bus: StateBus, cfg: dict, speech_q: queue.Queue):
         super().__init__(daemon=True, name="audio")
-        self.bus   = bus
-        self.cfg   = cfg["audio"]
-        self._stop = threading.Event()
+        self.bus      = bus
+        self.cfg      = cfg
+        self.speech_q = speech_q
+        self._stop    = threading.Event()
+        self._raw_q   = queue.Queue(maxsize=200)
 
     def run(self):
-        if not PYAUDIO_OK:
-            print("[audio] pyaudio not available — running silent")
-            return
-
-        pa     = pyaudio.PyAudio()
-        rate   = self.cfg["sample_rate"]
-        chunk  = self.cfg["chunk_size"]
-        device = self.cfg.get("device_index")  # None = default
-
-        stream = pa.open(
-            format=pyaudio.paInt16,
-            channels=1,
-            rate=rate,
-            input=True,
-            input_device_index=device,
-            frames_per_buffer=chunk,
+        print("[audio] loading Silero VAD...")
+        vad_model = load_silero_vad()
+        vad = VADIterator(
+            vad_model,
+            sampling_rate=RATE,
+            threshold=0.45,
+            min_silence_duration_ms=SILENCE_MS,
+            speech_pad_ms=80,
         )
+        print("[audio] ready")
 
-        bands  = self.cfg["fft_bands"]
-        freqs  = np.fft.rfftfreq(chunk, d=1.0 / rate)
-        n_bars = 16
+        def _cb(indata, frames, t, status):
+            self._raw_q.put(indata[:, 0].copy())
 
-        def band_energy(fft_mag, lo, hi):
-            mask = (freqs >= lo) & (freqs < hi)
-            return float(np.mean(fft_mag[mask])) if mask.any() else 0.0
+        stream = sd.InputStream(
+            samplerate=RATE, channels=1, dtype="float32",
+            blocksize=CHUNK_SAMPLES, callback=_cb,
+        )
+        stream.start()
+        print(f"[audio] stream @ {RATE}Hz, {CHUNK_MS}ms chunks")
 
-        peak = 1e-6  # adaptive peak for normalization
+        speech_buf    = []
+        was_recording = False
 
         while not self._stop.is_set():
             try:
-                raw  = stream.read(chunk, exception_on_overflow=False)
-                pcm  = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
-                pcm  /= 32768.0
+                chunk = self._raw_q.get(timeout=0.1)
+            except queue.Empty:
+                continue
 
-                rms  = float(np.sqrt(np.mean(pcm ** 2)))
+            # ── Animation ──────────────────────────────────────────────
+            rms  = float(np.sqrt(np.mean(chunk ** 2)))
+            bars = _fft_bands(chunk)
+            spec = np.abs(np.fft.rfft(chunk)) / (CHUNK_SAMPLES / 2 + 1e-9)
+            f    = np.fft.rfftfreq(CHUNK_SAMPLES, 1 / RATE)
+            self.bus.update(
+                volume   = min(rms * 4, 1.0),
+                bass     = min(float(np.mean(spec[(f >= 20)  & (f < 250)])) * 40, 1.0),
+                mid      = min(float(np.mean(spec[(f >= 250) & (f < 4000)])) * 20, 1.0),
+                high     = min(float(np.mean(spec[(f >= 4000)])) * 20, 1.0),
+                fft_bars = bars,
+                raw_rms  = rms,
+            )
 
-                fft  = np.abs(np.fft.rfft(pcm * np.hanning(len(pcm))))
-                peak = max(peak * 0.995, fft.max() + 1e-9)
-                fft_n = fft / peak
+            # ── Speech collection ──────────────────────────────────────
+            recording = self.bus.get("recording", False)
 
-                bass = band_energy(fft_n, *bands["bass"])
-                mid  = band_energy(fft_n, *bands["mid"])
-                high = band_energy(fft_n, *bands["high"])
+            if recording:
+                speech_buf.append(chunk)
+                was_recording = True
+                # Auto-stop when Silero detects end of speech
+                result = vad(chunk)
+                if result and "end" in result:
+                    self._flush(speech_buf, vad)
+                    speech_buf = []
+                    self.bus.update(recording=False)
 
-                # 16 log-spaced bars across full spectrum
-                log_edges = np.logspace(np.log10(20), np.log10(20000), n_bars + 1)
-                bars = [band_energy(fft_n, log_edges[i], log_edges[i+1]) for i in range(n_bars)]
-                # Progressive gain: lows×3, mids×5, highs×12 — compensates mic rolloff
-                gains = np.linspace(3.0, 12.0, n_bars)
-                bars = [min(1.0, max(0.03, b * gains[i])) for i, b in enumerate(bars)]
+            elif was_recording:
+                # Space released manually before VAD fired
+                self._flush(speech_buf, vad)
+                speech_buf    = []
+                was_recording = False
 
-                self.bus.update(
-                    volume=min(1.0, rms * 20),
-                    bass=min(1.0, bass * 4),
-                    mid=min(1.0, mid * 4),
-                    high=min(1.0, high * 4),
-                    fft_bars=bars,
-                    raw_audio=raw,
-                    raw_rms=rms,
-                )
+        stream.stop()
 
-            except Exception as e:
-                print(f"[audio] error: {e}")
-
-        stream.stop_stream()
-        stream.close()
-        pa.terminate()
+    def _flush(self, buf: list, vad: VADIterator):
+        if not buf:
+            return
+        audio = np.concatenate(buf)
+        if len(audio) > RATE * 0.3:     # ignore clips < 300ms
+            self.speech_q.put(audio)
+        vad.reset_states()
 
     def stop(self):
         self._stop.set()

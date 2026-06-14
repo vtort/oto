@@ -28,10 +28,6 @@ class StateBus:
             "face_detected":  False,
             "face_x_norm":    0.5,    # 0.0=left, 1.0=right
 
-            # Raw audio (shared with LLMThread — avoids double mic open)
-            "raw_audio":      b"",
-            "raw_rms":        0.0,
-
             # Touch
             "touch_active":   False,
             "touch_pos":      (0, 0),
