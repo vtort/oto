@@ -35,6 +35,11 @@ WAKE_PATTERNS = [
     r"oi\s+oto",
     r"oye\s+otto",
     r"hey\s+otto",
+    r"oye\s+auto",    # Whisper mishears "OTO" as "auto"
+    r"oh[,\s]+y\s+eso",  # "Oh, y eso" variant
+    r"oye\s+ot[ao]",
+    r"oye\s+o\.?t\.?o",
+    r"\boto\b",       # bare "OTO" — fallback if clear enough
 ]
 
 SYSTEM_PROMPT = (
