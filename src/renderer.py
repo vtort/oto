@@ -121,13 +121,15 @@ def _state(o, r): return np.array([[*p, r, r, a] for p, a in zip(_pos(o), _ANGLE
 
 _S = {
     MascotState.IDLE:   _state(_O,     _R),
+    MascotState.AWARE:  _state(_O,     _R),
     MascotState.LISTEN: _state(_O,     _R+.02),
     MascotState.TOUCH:  _state(0.008,  _R+.02),
 }
 
 _H = {
     MascotState.IDLE:   (0.07, 0.05, 0.03),
-    MascotState.LISTEN: (0.04, 0.12, 0.09),  # mix ×3 y ×4 → nunca forma fija
+    MascotState.AWARE:  (0.07, 0.05, 0.03),
+    MascotState.LISTEN: (0.04, 0.12, 0.09),
     MascotState.TOUCH:  (0.03, 0.02, 0.01),
 }
 
@@ -187,6 +189,7 @@ class Renderer:
         self._ep       = _S[MascotState.IDLE].copy()
         self._n_ep     = N_ELLIPSES
         self._harmonics   = np.array(_H[MascotState.IDLE], dtype=np.float32)
+        self._face_offset = np.array([0.0, 0.0], dtype=np.float32)
         self._drag        = np.array([0.0, 0.0], dtype=np.float32)
         self._touch_start = None   # posición píxel donde empezó el toque
         self._drag_origin = np.array([0.0, 0.0], dtype=np.float32)  # drag al inicio
@@ -202,6 +205,7 @@ class Renderer:
 
         state_col = {
             MascotState.IDLE:   (100, 100, 180),
+            MascotState.AWARE:  (80,  180, 240),
             MascotState.LISTEN: (80,  220, 140),
             MascotState.TOUCH:  (240, 160, 60),
         }.get(state, (140, 140, 140))
@@ -276,6 +280,15 @@ class Renderer:
         self._harmonics += (target_h - self._harmonics) * 0.08
 
 
+        # ── Face tracking: deriva suavemente hacia la cara en AWARE ──
+        face_x = snap.get("face_x_norm", 0.5)  # 0=izquierda, 1=derecha
+        if state == MascotState.AWARE:
+            # Mapear 0-1 a -0.25..+0.25 (desplazamiento suave, no extremo)
+            target_fx = (face_x - 0.5) * 0.50
+            self._face_offset[0] += (target_fx - self._face_offset[0]) * 0.03
+        else:
+            self._face_offset[0] += (0.0 - self._face_offset[0]) * 0.05
+
         # ── Drag: delta desde donde empezó el toque, vuelve al soltar ─
         touch_pos = snap.get("touch_pos", (self.W/2, self.H/2))
         if state == MascotState.TOUCH:
@@ -296,6 +309,7 @@ class Renderer:
         # Rotation: base angle per ellipse + time drift, faster when excited
         rot_speed = {
             MascotState.IDLE:   0.008,
+            MascotState.AWARE:  0.012,
             MascotState.LISTEN: 0.06,
             MascotState.TOUCH:  0.030,
         }.get(state, 0.010)
@@ -325,7 +339,7 @@ class Renderer:
             # pasar r igual en x e y da un círculo perfecto en píxeles reales
             r = (float(self._ep[i,2]) + float(self._ep[i,3])) * 0.5
             self.prog[f'u_ep{i}'].value = (
-                float(self._ep[i,0]) * asp + self._drag[0] * asp,
+                float(self._ep[i,0]) * asp + (self._drag[0] + self._face_offset[0]) * asp,
                 float(self._ep[i,1]) + self._drag[1],
                 r,
                 r,

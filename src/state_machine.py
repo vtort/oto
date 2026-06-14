@@ -4,11 +4,12 @@ from state import MascotState, StateBus
 
 STATE_COLORS = {
     MascotState.IDLE:   "#6366f1",
+    MascotState.AWARE:  "#38bdf8",
     MascotState.LISTEN: "#4ade80",
     MascotState.TOUCH:  "#fb923c",
 }
 
-DEMO_SEQUENCE = [MascotState.IDLE, MascotState.LISTEN]
+DEMO_SEQUENCE = [MascotState.IDLE, MascotState.AWARE, MascotState.LISTEN]
 
 
 class StateMachine:
@@ -40,10 +41,14 @@ class StateMachine:
         idle_th = self.cfg["audio"]["idle_threshold"]
         listen_th = idle_th * 35.0  # umbral alto — solo voz clara
 
+        face = snap["face_detected"]
+
         if touch:
             new = MascotState.TOUCH
         elif volume > listen_th:
             new = MascotState.LISTEN
+        elif face:
+            new = MascotState.AWARE
         else:
             new = MascotState.IDLE
 
