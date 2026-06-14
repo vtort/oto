@@ -9,7 +9,7 @@ from state import MascotState, StateBus
 # ── Shaders ───────────────────────────────────────────────────────────────────
 
 VERT = """
-#version 300 es
+#version 330 core
 in vec2 in_vert;
 out vec2 v_uv;
 void main() {
@@ -19,8 +19,7 @@ void main() {
 """
 
 FRAG = """
-#version 300 es
-precision highp float;
+#version 330 core
 in  vec2  v_uv;
 out vec4  fragColor;
 
@@ -74,7 +73,7 @@ void main() {
 
 # Overlay quad for HUD texture
 HUD_VERT = """
-#version 300 es
+#version 330 core
 in vec2 in_vert;
 in vec2 in_uv;
 out vec2 v_uv;
@@ -85,8 +84,7 @@ void main() {
 """
 
 HUD_FRAG = """
-#version 300 es
-precision mediump float;
+#version 330 core
 in  vec2      v_uv;
 out vec4      fragColor;
 uniform sampler2D u_tex;
@@ -150,6 +148,10 @@ class Renderer:
         self.fps  = cfg["display"]["fps"]
         # ── pygame + OpenGL window ─────────────────────────────────────
         pygame.init()
+        pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
+        pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
+        pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK,
+                                        pygame.GL_CONTEXT_PROFILE_CORE)
         flags = pygame.OPENGL | pygame.DOUBLEBUF
         if cfg["display"]["fullscreen"]:
             flags |= pygame.FULLSCREEN
@@ -159,7 +161,7 @@ class Renderer:
         self.clock = pygame.time.Clock()
 
         # ── ModernGL context ──────────────────────────────────────────
-        self.ctx = moderngl.create_context(require=300)
+        self.ctx = moderngl.create_context(require=330)
         self.ctx.enable(moderngl.BLEND)
         self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
 
