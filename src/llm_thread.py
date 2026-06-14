@@ -26,7 +26,7 @@ CHANNELS      = 1
 CHUNK         = 1024          # ~64ms chunks for VAD
 FORMAT        = pyaudio.paInt16
 
-VAD_THRESHOLD = 250           # RMS to consider "voice present" — tune if needed
+VAD_THRESHOLD = 600           # RMS to consider "voice present" — tune if needed
 SILENCE_LIMIT = 1.2           # seconds of silence to end recording
 MAX_RECORD_S  = 4             # max for wake word clip
 MAX_QUESTION_S = 15           # max for full question
@@ -68,8 +68,10 @@ class LLMThread(threading.Thread):
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
     def run(self):
-        self._pa = pyaudio.PyAudio()
         self._load_whisper()
+        print("[llm] opening audio input...")
+        self._pa = pyaudio.PyAudio()
+        print("[llm] audio ready")
         try:
             self._loop()
         finally:
