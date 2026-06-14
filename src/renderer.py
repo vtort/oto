@@ -453,8 +453,14 @@ class Renderer:
                 if event.type == pygame.QUIT:
                     if _time.monotonic() - start > 2.0:
                         running = False
-                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                    running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        running = False
+                    elif event.key == pygame.K_SPACE:
+                        self.bus.update(recording=True)
+                elif event.type == pygame.KEYUP:
+                    if event.key == pygame.K_SPACE:
+                        self.bus.update(recording=False)
                 elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
                     pos = getattr(event, 'pos', None) or (
                         int(event.x * self.W), int(event.y * self.H))

@@ -156,7 +156,11 @@ class LLMThread(threading.Thread):
             return
         print(f"[llm] response: {response!r}")
         self.bus.update(state=MascotState.ANSWER, response_text=response)
+        # TTS y animación en paralelo
+        tts = threading.Thread(target=self._speak, args=(response,), daemon=True)
+        tts.start()
         self._simulate_speaking(response)
+        tts.join()
         self.bus.update(state=MascotState.IDLE, speaking_level=0.0)
 
     def _simulate_speaking(self, text: str):
