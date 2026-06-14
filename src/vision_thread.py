@@ -66,6 +66,7 @@ class VisionThread(threading.Thread):
             if not ret:
                 continue
 
+            frame  = cv2.flip(frame, 1)  # corregir espejo horizontal
             gray   = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             gray   = cv2.equalizeHist(gray)   # mejora detección con poca luz
 

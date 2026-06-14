@@ -281,7 +281,7 @@ class Renderer:
 
 
         # ── Face tracking: deriva suavemente hacia la cara en AWARE ──
-        face_x = 1.0 - snap.get("face_x_norm", 0.5)  # invertir — cámara en espejo
+        face_x = snap.get("face_x_norm", 0.5)  # ya corregido en vision_thread
         if state == MascotState.AWARE:
             target_fx = (face_x - 0.5) * 0.30  # máx ±15% de pantalla
             self._face_offset[0] += (target_fx - self._face_offset[0]) * 0.015  # muy suave
