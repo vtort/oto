@@ -68,8 +68,6 @@ class StateMachine:
             wanted = MascotState.LISTEN
         elif touch:
             wanted = MascotState.TOUCH
-        elif volume > listen_th:
-            wanted = MascotState.LISTEN
         elif face:
             wanted = MascotState.AWARE
         else:
