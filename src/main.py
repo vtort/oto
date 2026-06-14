@@ -18,6 +18,7 @@ from state import StateBus
 from state_machine import StateMachine
 from audio_thread import AudioThread
 from vision_thread import VisionThread
+from llm_thread import LLMThread
 from renderer import Renderer
 
 
@@ -53,6 +54,11 @@ def main():
     sm_thread.start()
     print("[oto] state machine started")
 
+    llm = LLMThread(bus, cfg)
+    if not demo:
+        llm.start()
+        print("[oto] LLM thread started — say 'hey jarvis' to activate")
+
     renderer = Renderer(bus, cfg, demo=demo)
     print("[oto] renderer starting — press ESC to quit")
     try:
@@ -61,6 +67,7 @@ def main():
         stop.set()
         audio.stop()
         vision.stop()
+        llm.stop()
         print("[oto] shutdown complete")
 
 

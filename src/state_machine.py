@@ -3,11 +3,16 @@ from state import MascotState, StateBus
 
 
 STATE_COLORS = {
-    MascotState.IDLE:   "#6366f1",
-    MascotState.AWARE:  "#38bdf8",
-    MascotState.LISTEN: "#4ade80",
-    MascotState.TOUCH:  "#fb923c",
+    MascotState.IDLE:     "#6366f1",
+    MascotState.AWARE:    "#38bdf8",
+    MascotState.LISTEN:   "#4ade80",
+    MascotState.TOUCH:    "#fb923c",
+    MascotState.THINKING: "#c084fc",
+    MascotState.ANSWER:   "#fbbf24",
 }
+
+# States driven externally by LLMThread — state machine must not override them
+LLM_STATES = {MascotState.THINKING, MascotState.ANSWER}
 
 DEMO_SEQUENCE = [MascotState.IDLE, MascotState.AWARE, MascotState.LISTEN, MascotState.TOUCH, MascotState.THINKING]
 DEMO_DURATION = 6.0  # seconds per state
@@ -35,6 +40,12 @@ class StateMachine:
 
         snap = self.bus.snapshot()
         now  = time.monotonic()
+
+        # LLM thread owns these states — don't override
+        if snap["state"] in LLM_STATES:
+            self._state = snap["state"]
+            self.bus.update(state_color=STATE_COLORS[self._state])
+            return
 
         volume = snap["volume"]
         bass   = snap["bass"]

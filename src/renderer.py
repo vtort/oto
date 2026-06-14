@@ -120,11 +120,12 @@ def _pos(o): return [(0.000, o), (-o*0.87, -o*0.50), (o*0.87, -o*0.50)]
 def _state(o, r): return np.array([[*p, r, r, a] for p, a in zip(_pos(o), _ANGLES)], dtype=np.float32)
 
 _S = {
-    MascotState.IDLE:   _state(_O,     _R),
+    MascotState.IDLE:     _state(_O,     _R),
     MascotState.AWARE:    _state(_O,     _R),
     MascotState.LISTEN:   _state(_O,     _R+.02),
     MascotState.TOUCH:    _state(0.008,  _R+.02),
     MascotState.THINKING: _state(_O,     _R),
+    MascotState.ANSWER:   _state(_O,     _R+.02),
 }
 
 _H = {
@@ -133,6 +134,7 @@ _H = {
     MascotState.LISTEN:   (0.04, 0.12, 0.09),
     MascotState.TOUCH:    (0.03, 0.02, 0.01),
     MascotState.THINKING: (0.04, 0.02, 0.01),
+    MascotState.ANSWER:   (0.04, 0.12, 0.09),
 }
 
 def _lerp(a, b, t):
@@ -212,6 +214,7 @@ class Renderer:
             MascotState.LISTEN:   (80,  220, 140),
             MascotState.TOUCH:    (240, 160, 60),
             MascotState.THINKING: (200, 140, 240),
+            MascotState.ANSWER:   (240, 200, 80),
         }.get(state, (140, 140, 140))
 
         lines = [
@@ -282,10 +285,10 @@ class Renderer:
 
         # Lerp armónicos → transición suave de forma al cambiar estado
         target_h = np.array(_H[state], dtype=np.float32)
-        # En LISTEN: los pétalos (h4) pulsan con volumen y mid
-        if state == MascotState.LISTEN:
+        # En LISTEN/ANSWER: los pétalos pulsan con audio (micro o TTS)
+        if state in (MascotState.LISTEN, MascotState.ANSWER):
             audio_pulse = self._vol * 0.20 + self._mid * 0.12
-            target_h[2] = _H[MascotState.LISTEN][2] + audio_pulse
+            target_h[2] = _H[state][2] + audio_pulse
         self._harmonics += (target_h - self._harmonics) * 0.08
 
 
@@ -321,14 +324,15 @@ class Renderer:
             MascotState.LISTEN:   0.06,
             MascotState.TOUCH:    0.030,
             MascotState.THINKING: 0.004,
+            MascotState.ANSWER:   0.06,
         }.get(state, 0.010)
-        if state == MascotState.LISTEN:
+        if state in (MascotState.LISTEN, MascotState.ANSWER):
             rot_speed += self._vol * 0.18 + self._mid * 0.10
         rot_speed += self._bass * 0.02
 
         # 2 elipses en sentido horario, 1 antihorario → sensación de movimiento opuesto
         _speed_mult = [1.00, -1.41, 1.73]
-        if state == MascotState.LISTEN:
+        if state in (MascotState.LISTEN, MascotState.ANSWER):
             _wobble_amp   = 0.12
             _wobble_freqs = [0.11, 0.17, 0.13]
         else:

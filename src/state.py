@@ -8,6 +8,7 @@ class MascotState(Enum):
     LISTEN   = auto()
     TOUCH    = auto()
     THINKING = auto()
+    ANSWER   = auto()
 
 
 class StateBus:
