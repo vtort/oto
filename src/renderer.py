@@ -205,6 +205,7 @@ class Renderer:
         self._high     = 0.0
         self._bars     = [0.0] * 16
         self._rot_offs = np.zeros(N_ELLIPSES, dtype=np.float32)
+        self._ea       = np.zeros(N_ELLIPSES, dtype=np.float32)  # rendered angle per ellipse, lerped
         self._rot_speed = 0.008   # lerped rotation speed for smooth transitions
         self._squish_x  = 1.0    # lerped squish for THINKING
         self._squish_y  = 1.0
@@ -405,8 +406,13 @@ class Renderer:
 
         for i in range(N_ELLIPSES):
             angle = self._ep[i, 4] + self._rot_offs[i]
-            # THINKING: ángulo forzado a 0 (lerped via squish approach)
-            ea = 0.0 if state == MascotState.THINKING else float(angle)
+            if state == MascotState.THINKING:
+                # Lerp rendered angle toward 0 — smooth squish entry
+                self._ea[i] = _lerp(self._ea[i], 0.0, 0.05)
+            else:
+                # Sync rot_offs so rotation continues from current _ea on exit
+                self._rot_offs[i] = self._ea[i] - self._ep[i, 4]
+                self._ea[i] = angle
             r  = (float(self._ep[i,2]) + float(self._ep[i,3])) * 0.5
             self.prog[f'u_ep{i}'].value = (
                 float(self._ep[i,0]) * asp + (self._drag[0] + self._face_offset[0]) * asp,
@@ -414,7 +420,7 @@ class Renderer:
                 r * self._squish_x,
                 r * self._squish_y,
             )
-            self.prog[f'u_ea{i}'].value = ea
+            self.prog[f'u_ea{i}'].value = float(self._ea[i])
             self.prog[f'u_ec{i}'].value = tuple(ELLIPSE_COLORS[i].tolist())
             self.prog[f'u_eph{i}'].value = float(angle + i * 2.094)
 
