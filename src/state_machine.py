@@ -43,6 +43,15 @@ class StateMachine:
 
         face = snap["face_detected"]
 
+        # Allow THINKING to be set externally (button); don't override it
+        if snap["state"] == MascotState.THINKING and self._state != MascotState.THINKING:
+            self._state = MascotState.THINKING
+            self._state_since = now
+
+        if self._state == MascotState.THINKING:
+            self.bus.update(state=self._state, state_color="#c084fc")
+            return
+
         if touch:
             new = MascotState.TOUCH
         elif volume > listen_th:
@@ -56,4 +65,4 @@ class StateMachine:
             self._state = new
             self._state_since = now
 
-        self.bus.update(state=self._state, state_color=STATE_COLORS[self._state])
+        self.bus.update(state=self._state, state_color=STATE_COLORS.get(self._state, "#6366f1"))

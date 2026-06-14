@@ -145,6 +145,7 @@ class Renderer:
         self.W   = cfg["display"]["width"]
         self.H   = cfg["display"]["height"]
         self.fps = cfg["display"]["fps"]
+        self.THINK_BTN = pygame.Rect(10, 0, 120, 40)  # real y set after H known
 
         # ── pygame + OpenGL window ─────────────────────────────────────
         pygame.init()
@@ -201,6 +202,9 @@ class Renderer:
         self._high     = 0.0
         self._bars     = [0.0] * 16
         self._rot_offs = np.zeros(N_ELLIPSES, dtype=np.float32)
+        self.THINK_BTN = pygame.Rect(10, self.H - 50, 120, 40)
+
+    THINK_BTN: pygame.Rect  # set in __init__ after H is known
 
     def _update_hud(self, state, face, volume, debug_frame):
         self.hud_surf.fill((0, 0, 0, 0))
@@ -221,6 +225,15 @@ class Renderer:
         for i, (txt, col) in enumerate(lines):
             surf = self.hud_font.render(txt, True, col)
             self.hud_surf.blit(surf, (10, 10 + i * 20))
+
+        # Botón THINK en esquina inferior izquierda
+        is_thinking = state == MascotState.THINKING
+        btn_col  = (180, 100, 240) if is_thinking else (60, 40, 90)
+        btn_rect = pygame.Rect(10, self.H - 50, 120, 40)
+        self.THINK_BTN = btn_rect
+        pygame.draw.rect(self.hud_surf, btn_col, btn_rect, border_radius=8)
+        label = self.hud_font.render("THINK" if not is_thinking else "STOP", True, (240, 240, 240))
+        self.hud_surf.blit(label, (btn_rect.x + 10, btn_rect.y + 12))
 
         if debug_frame is not None:
             try:
@@ -389,7 +402,11 @@ class Renderer:
                 elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
                     pos = getattr(event, 'pos', None) or (
                         int(event.x * self.W), int(event.y * self.H))
-                    self.bus.update(touch_active=True, touch_pos=pos)
+                    if self.THINK_BTN.collidepoint(pos):
+                        cur = self.bus.get("state")
+                        self.bus.update(state=(MascotState.IDLE if cur == MascotState.THINKING else MascotState.THINKING))
+                    else:
+                        self.bus.update(touch_active=True, touch_pos=pos)
                 elif event.type in (pygame.MOUSEMOTION, pygame.FINGERMOTION):
                     if snap := self.bus.snapshot():
                         if snap.get("touch_active"):
