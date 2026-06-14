@@ -354,6 +354,8 @@ class Renderer:
 
         for i in range(N_ELLIPSES):
             angle = self._ep[i, 4] + self._rot_offs[i]
+            # THINKING: forzar ángulo a 0 para que el squish sea horizontal en todos
+            ea = 0.0 if state == MascotState.THINKING else float(angle)
             r = (float(self._ep[i,2]) + float(self._ep[i,3])) * 0.5 * size_pulse
             self.prog[f'u_ep{i}'].value = (
                 float(self._ep[i,0]) * asp + (self._drag[0] + self._face_offset[0]) * asp,
@@ -361,7 +363,7 @@ class Renderer:
                 r * squish_x,
                 r * squish_y,
             )
-            self.prog[f'u_ea{i}'].value = float(angle)
+            self.prog[f'u_ea{i}'].value = ea
             self.prog[f'u_ec{i}'].value = tuple(ELLIPSE_COLORS[i].tolist())
             self.prog[f'u_eph{i}'].value = float(angle + i * 2.094)
 
