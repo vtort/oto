@@ -121,16 +121,18 @@ def _state(o, r): return np.array([[*p, r, r, a] for p, a in zip(_pos(o), _ANGLE
 
 _S = {
     MascotState.IDLE:   _state(_O,     _R),
-    MascotState.AWARE:  _state(_O,     _R),
-    MascotState.LISTEN: _state(_O,     _R+.02),
-    MascotState.TOUCH:  _state(0.008,  _R+.02),
+    MascotState.AWARE:    _state(_O,     _R),
+    MascotState.LISTEN:   _state(_O,     _R+.02),
+    MascotState.TOUCH:    _state(0.008,  _R+.02),
+    MascotState.THINKING: _state(_O,     _R),
 }
 
 _H = {
-    MascotState.IDLE:   (0.07, 0.05, 0.03),
-    MascotState.AWARE:  (0.07, 0.05, 0.03),
-    MascotState.LISTEN: (0.04, 0.12, 0.09),
-    MascotState.TOUCH:  (0.03, 0.02, 0.01),
+    MascotState.IDLE:     (0.07, 0.05, 0.03),
+    MascotState.AWARE:    (0.07, 0.05, 0.03),
+    MascotState.LISTEN:   (0.04, 0.12, 0.09),
+    MascotState.TOUCH:    (0.03, 0.02, 0.01),
+    MascotState.THINKING: (0.04, 0.02, 0.01),
 }
 
 def _lerp(a, b, t):
@@ -204,10 +206,11 @@ class Renderer:
         self.hud_surf.fill((0, 0, 0, 0))
 
         state_col = {
-            MascotState.IDLE:   (100, 100, 180),
-            MascotState.AWARE:  (80,  180, 240),
-            MascotState.LISTEN: (80,  220, 140),
-            MascotState.TOUCH:  (240, 160, 60),
+            MascotState.IDLE:     (100, 100, 180),
+            MascotState.AWARE:    (80,  180, 240),
+            MascotState.LISTEN:   (80,  220, 140),
+            MascotState.TOUCH:    (240, 160, 60),
+            MascotState.THINKING: (200, 140, 240),
         }.get(state, (140, 140, 140))
 
         lines = [
@@ -307,10 +310,11 @@ class Renderer:
 
         # Rotation: base angle per ellipse + time drift, faster when excited
         rot_speed = {
-            MascotState.IDLE:   0.008,
-            MascotState.AWARE:  0.012,
-            MascotState.LISTEN: 0.06,
-            MascotState.TOUCH:  0.030,
+            MascotState.IDLE:     0.008,
+            MascotState.AWARE:    0.012,
+            MascotState.LISTEN:   0.06,
+            MascotState.TOUCH:    0.030,
+            MascotState.THINKING: 0.004,
         }.get(state, 0.010)
         if state == MascotState.LISTEN:
             rot_speed += self._vol * 0.18 + self._mid * 0.10
@@ -332,16 +336,24 @@ class Renderer:
         self.ctx.clear(0.04, 0.04, 0.07, 1.0)
 
         asp = self.W / self.H
+
+        # THINKING: squish+pulse — aplasta verticalmente y pulsa en tamaño
+        if state == MascotState.THINKING:
+            pulse    = math.sin(t * 1.8)                  # 0.9 Hz
+            squish_x = 1.0 + pulse * 0.22                 # más ancho en el pico
+            squish_y = 1.0 - pulse * 0.22                 # más plano en el pico
+            size_pulse = 1.0 + abs(pulse) * 0.08          # pulso de tamaño suave
+        else:
+            squish_x = squish_y = size_pulse = 1.0
+
         for i in range(N_ELLIPSES):
             angle = self._ep[i, 4] + self._rot_offs[i]
-            # Radio sin multiplicar por asp — en p-space asp-compensado,
-            # pasar r igual en x e y da un círculo perfecto en píxeles reales
-            r = (float(self._ep[i,2]) + float(self._ep[i,3])) * 0.5
+            r = (float(self._ep[i,2]) + float(self._ep[i,3])) * 0.5 * size_pulse
             self.prog[f'u_ep{i}'].value = (
                 float(self._ep[i,0]) * asp + (self._drag[0] + self._face_offset[0]) * asp,
                 float(self._ep[i,1]) + self._drag[1],
-                r,
-                r,
+                r * squish_x,
+                r * squish_y,
             )
             self.prog[f'u_ea{i}'].value = float(angle)
             self.prog[f'u_ec{i}'].value = tuple(ELLIPSE_COLORS[i].tolist())
@@ -372,6 +384,8 @@ class Renderer:
                         running = False
                 elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     running = False
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_t:
+                    self.bus.update(state=MascotState.THINKING)
                 elif event.type in (pygame.MOUSEBUTTONDOWN, pygame.FINGERDOWN):
                     pos = getattr(event, 'pos', None) or (
                         int(event.x * self.W), int(event.y * self.H))

@@ -3,10 +3,11 @@ from enum import Enum, auto
 
 
 class MascotState(Enum):
-    IDLE   = auto()
-    AWARE  = auto()
-    LISTEN = auto()
-    TOUCH  = auto()
+    IDLE     = auto()
+    AWARE    = auto()
+    LISTEN   = auto()
+    TOUCH    = auto()
+    THINKING = auto()
 
 
 class StateBus:
