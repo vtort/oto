@@ -117,6 +117,8 @@ class LLMThread(threading.Thread):
                 continue
 
             text = self._transcribe(frames)
+            if not text:
+                continue
             print(f"[llm] heard: {text!r}")
 
             if not _is_wake_word(text):
