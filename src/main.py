@@ -56,8 +56,10 @@ def main():
 
     llm = LLMThread(bus, cfg)
     if not demo:
+        # Pre-load Whisper before renderer starts OpenGL (avoids resource contention)
+        llm.preload_whisper()
         llm.start()
-        print("[oto] LLM thread started — say 'hey jarvis' to activate")
+        print("[oto] LLM thread started — say 'oye OTO' to activate")
 
     renderer = Renderer(bus, cfg, demo=demo)
     print("[oto] renderer starting — press ESC to quit")

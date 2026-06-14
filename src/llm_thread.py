@@ -64,15 +64,24 @@ class LLMThread(threading.Thread):
             api_key=os.environ.get("ANTHROPIC_API_KEY", "")
         )
         self._whisper = None
+        self._whisper_ready = threading.Event()
         # Detect actual sample rate from config
         self._rate = cfg.get("audio", {}).get("sample_rate", SAMPLE_RATE)
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
+    def preload_whisper(self):
+        """Call before start() to load Whisper synchronously in main thread."""
+        self._load_whisper()
+
     def run(self):
-        self._whisper_ready = threading.Event()
-        loader = threading.Thread(target=self._load_whisper, daemon=True)
-        loader.start()
+        if not self._whisper:
+            # Fallback: load in thread if preload wasn't called
+            self._whisper_ready = threading.Event()
+            loader = threading.Thread(target=self._load_whisper, daemon=True)
+            loader.start()
+        else:
+            self._whisper_ready.set()
         self._loop()
 
     def stop(self):
@@ -92,8 +101,10 @@ class LLMThread(threading.Thread):
     # ── Main loop (polls StateBus for raw audio) ───────────────────────────────
 
     def _loop(self):
-        # Wait for Whisper to finish loading before processing audio
-        self._whisper_ready.wait()
+        # Wait for Whisper to finish loading (max 60s)
+        if not self._whisper_ready.wait(timeout=60):
+            print("[llm] Whisper load timed out, LLM disabled")
+            return
         if not self._whisper:
             print("[llm] Whisper failed to load, LLM disabled")
             return
